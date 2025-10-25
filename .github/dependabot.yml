@@ -1,11 +1,11 @@
-# Set update schedule for GitHub Actions
-
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: "pip"
     directory: "/"
+    insecure-external-code-execution: allow
+    pull-request-branch-name:
+      # Separate sections of the branch name with a hyphen
+      # for example, `dependabot-npm_and_yarn-next_js-acorn-6.4.1`
+      separator: "-"
     schedule:
-      interval: "monthly"
-    commit-message:
-      prefix: "build(deps):"
-      include: scope
+      interval: "daily"

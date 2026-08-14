@@ -1,5 +1,3 @@
-import { FieldParserType, FieldValidatorType } from "../api";
-
 export type getCodesObjProps = {
   runCurlCode: string;
   webhookCurlCode: string;
@@ -16,6 +14,7 @@ export enum FormatterType {
   text = "text",
   number = "number",
   json = "json",
+  boolean = "boolean",
 }
 
 export interface ColumnField {
@@ -25,7 +24,10 @@ export interface ColumnField {
   filterable: boolean;
   formatter?: FormatterType;
   description?: string;
+  load_from_db?: boolean;
   disable_edit?: boolean;
-  default?: any; // Add this line
-  edit_mode?: "modal" | "inline";
+  default?: any;
+  edit_mode?: "modal" | "inline" | "popover";
+  hidden?: boolean;
+  options?: string[];
 }

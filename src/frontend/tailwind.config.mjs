@@ -1,11 +1,12 @@
 /** @type {import('tailwindcss').Config} */
+
+import tailwindcssContainerQueries from "@tailwindcss/container-queries";
 import tailwindcssForms from "@tailwindcss/forms";
 import tailwindcssTypography from "@tailwindcss/typography";
+import { fontFamily } from "tailwindcss/defaultTheme";
+import plugin from "tailwindcss/plugin";
 import tailwindcssAnimate from "tailwindcss-animate";
 import tailwindcssDottedBackground from "tailwindcss-dotted-background";
-import { fontFamily } from "tailwindcss/defaultTheme";
-
-import plugin from "tailwindcss/plugin";
 
 const config = {
   variants: {
@@ -33,27 +34,86 @@ const config = {
       center: true,
       screens: {
         "2xl": "1400px",
+        "3xl": "1500px",
       },
     },
     extend: {
       screens: {
+        mdd: "45rem",
         xl: "1200px",
         "2xl": "1400px",
+        "3xl": "1500px",
       },
       keyframes: {
+        // Overlay animations
+        overlayShow: {
+          from: { opacity: 0 },
+          to: { opacity: 1 },
+        },
+        overlayHide: {
+          from: { opacity: 1 },
+          to: { opacity: 0 },
+        },
+
+        // Content animations - now including both scale and clip in one animation
+        contentShow: {
+          from: {
+            opacity: 0,
+            transform: "translate(-50%, -50%) scale(0.95)",
+            clipPath: "inset(50% 0)",
+            boxShadow: "0 4px 8px -2px rgba(0, 0, 0, 0.1)", // Smaller shadow
+          },
+          to: {
+            opacity: 1,
+            transform: "translate(-50%, -50%) scale(1)",
+            clipPath: "inset(0% 0)",
+            boxShadow:
+              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+          },
+        },
+        contentHide: {
+          from: {
+            opacity: 1,
+            transform: "translate(-50%, -50%) scale(1)",
+            clipPath: "inset(0% 0)",
+            boxShadow:
+              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+          },
+          to: {
+            opacity: 0,
+            transform: "translate(-50%, -50%) scale(0.95)",
+            clipPath: "inset(50% 0)",
+            boxShadow: "0 4px 8px -2px rgba(0, 0, 0, 0.1)",
+          },
+        },
         wiggle: {
           "0%, 100%": { transform: "scale(100%)" },
           "50%": { transform: "scale(120%)" },
+        },
+        jiggle: {
+          "0%, 100%": { transform: "rotate(-1deg)" },
+          "50%": { transform: "rotate(1deg)" },
         },
         "border-beam": {
           "100%": {
             "offset-distance": "100%",
           },
         },
+        "pulse-pink": {
+          "0%, 100%": { backgroundColor: "hsla(var(--accent-pink), 1)" },
+          "50%": { backgroundColor: "hsla(var(--accent-pink), 0.4)" },
+        },
       },
       animation: {
+        // Animation definitions
+        overlayShow: "overlayShow 400ms cubic-bezier(0.16, 1, 0.3, 1)",
+        overlayHide: "overlayHide 500ms cubic-bezier(0.16, 1, 0.3, 1)",
+        contentShow: "contentShow 400ms cubic-bezier(0.16, 1, 0.3, 1)",
+        contentHide: "contentHide 500ms cubic-bezier(0.16, 1, 0.3, 1)",
         wiggle: "wiggle 150ms ease-in-out 1",
+        "pulse-pink": "pulse-pink 2s linear infinite",
         "slow-wiggle": "wiggle 500ms ease-in-out 1",
+        jiggle: "jiggle 150ms ease-in-out infinite",
         "border-beam": "border-beam calc(var(--duration)*1s) infinite linear",
       },
       colors: {
@@ -115,8 +175,12 @@ const config = {
         },
         "success-background": "var(--success-background)",
         "success-foreground": "var(--success-foreground)",
-        "accent-pink": "hsl(var(--accent-pink))",
         "accent-pink-foreground": "hsl(var(--accent-pink-foreground))",
+        "accent-purple-foreground": "hsl(var(--accent-purple-foreground))",
+        "accent-purple-muted": "hsl(var(--accent-purple-muted))",
+        "accent-purple-muted-foreground":
+          "hsl(var(--accent-purple-muted-foreground))",
+        "accent-red-foreground": "hsl(var(--accent-red-foreground))",
         filter: {
           foreground: "var(--filter-foreground)",
           background: "var(--filter-background)",
@@ -175,6 +239,10 @@ const config = {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        "accent-amber": {
+          DEFAULT: "hsl(var(--accent-amber))",
+          foreground: "hsl(var(--accent-amber-foreground))",
+        },
         "accent-emerald": {
           DEFAULT: "hsl(var(--accent-emerald))",
           foreground: "hsl(var(--accent-emerald-foreground))",
@@ -184,9 +252,24 @@ const config = {
           DEFAULT: "hsl(var(--accent-indigo))",
           foreground: "hsl(var(--accent-indigo-foreground))",
         },
+        "accent-blue": {
+          DEFAULT: "hsl(var(--accent-blue))",
+          foreground: "hsl(var(--accent-blue-foreground))",
+          muted: "hsl(var(--accent-blue-muted))",
+          "muted-foreground": "hsl(var(--accent-blue-muted-foreground))",
+        },
+        "deployment-callout": {
+          DEFAULT: "hsl(var(--deployment-callout))",
+          border: "hsl(var(--deployment-callout-border))",
+          foreground: "hsl(var(--deployment-callout-foreground))",
+        },
         "accent-pink": {
           DEFAULT: "hsl(var(--accent-pink))",
           foreground: "hsl(var(--accent-pink-foreground))",
+        },
+        "accent-assistant": {
+          brand: "hsl(var(--accent-assistant-brand))",
+          purple: "hsl(var(--accent-assistant-purple))",
         },
         popover: {
           DEFAULT: "hsl(var(--popover))",
@@ -257,6 +340,10 @@ const config = {
         "terminal-green": "hsl(var(--terminal-green))",
         "cosmic-void": "hsl(var(--cosmic-void))",
         "slider-input-border": "var(--slider-input-border)",
+        "zinc-foreground": "hsl(var(--zinc-foreground))",
+        "red-foreground": "hsl(var(--red-foreground))",
+        "indigo-foreground": "hsl(var(--indigo-foreground))",
+        "discord-color": "var(--discord-color)",
       },
       borderRadius: {
         lg: `var(--radius)`,
@@ -288,15 +375,26 @@ const config = {
         100: "100",
         999: "999",
       },
+      fontSize: {
+        xxs: "11px",
+        mmd: "13px",
+      },
+      height: {
+        4.5: "18px",
+      },
+      width: {
+        4.5: "18px",
+      },
     },
   },
 
   plugins: [
+    tailwindcssContainerQueries,
     tailwindcssAnimate,
     tailwindcssForms({
       strategy: "class", // only generate classes
     }),
-    plugin(function ({ addUtilities }) {
+    plugin(({ addUtilities }) => {
       addUtilities({
         ".scrollbar-hide": {
           /* IE and Edge */
@@ -307,6 +405,9 @@ const config = {
           "&::-webkit-scrollbar": {
             display: "none",
           },
+        },
+        ".gutter-stable": {
+          "scrollbar-gutter": "stable",
         },
         ".truncate-multiline": {
           display: "-webkit-box",
@@ -361,6 +462,9 @@ const config = {
           "&::-webkit-scrollbar-thumb:hover": {
             backgroundColor: "hsl(var(--placeholder-foreground))",
           },
+          "&::-webkit-scrollbar-corner": {
+            backgroundColor: "transparent",
+          },
           cursor: "auto",
         },
         ".dark .theme-attribution .react-flow__attribution": {
@@ -375,10 +479,6 @@ const config = {
         },
         ".text-align-last-right": {
           "text-align-last": "right",
-        },
-        ":focus-visible": {
-          outline: "none  !important",
-          outlineOffset: "0px !important",
         },
         ".note-node-markdown": {
           lineHeight: "1",
@@ -396,7 +496,7 @@ const config = {
     }),
     tailwindcssTypography,
     tailwindcssDottedBackground,
-    plugin(function ({ addUtilities, theme, e }) {
+    plugin(({ addUtilities, theme, e }) => {
       const colors = theme("colors");
 
       const generateUtilities = (colors, prefix = "") => {
@@ -408,11 +508,12 @@ const config = {
             acc[`.truncate-${className}`] = {
               position: "relative",
               overflow: "hidden",
+              pointerEvents: "none",
               "&::after": {
                 content: '""',
                 position: "absolute",
                 inset: "0 0 0 0",
-                background: `linear-gradient(to right, transparent, 75%, ${colorValue})`,
+                background: `linear-gradient(to right, transparent 80%, ${colorValue})`,
               },
             };
           } else if (typeof colorValue === "object") {
@@ -421,11 +522,12 @@ const config = {
               acc[`.truncate-${className}`] = {
                 position: "relative",
                 overflow: "hidden",
+                pointerEvents: "none",
                 "&::after": {
                   content: '""',
                   position: "absolute",
                   inset: "0 0 0 0",
-                  background: `linear-gradient(to right, transparent, ${colorValue.DEFAULT})`,
+                  background: `linear-gradient(to right, transparent 80%, ${colorValue.DEFAULT})`,
                 },
               };
             }

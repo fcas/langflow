@@ -1,31 +1,37 @@
+import { useTranslation } from "react-i18next";
 import IconComponent from "@/components/common/genericIconComponent";
 import ShadTooltip from "@/components/common/shadTooltipComponent";
+import { convertTestName } from "@/components/common/storeCardComponent/utils/convert-test-name";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select-custom";
-import { FolderType } from "@/pages/MainPage/entities";
+import { usePermissions } from "@/contexts/permissionsContext";
+import type { FolderType } from "@/pages/MainPage/entities";
 import { cn } from "@/utils/utils";
 import { handleSelectChange } from "../helpers/handle-select-change";
 import { FolderSelectItem } from "./folder-select-item";
 
 export const SelectOptions = ({
   item,
-  index,
   handleDeleteFolder,
   handleDownloadFolder,
   handleSelectFolderToRename,
   checkPathName,
 }: {
   item: FolderType;
-  index: number;
   handleDeleteFolder: ((folder: FolderType) => void) | undefined;
   handleDownloadFolder: (folderId: string) => void;
   handleSelectFolderToRename: (folder: FolderType) => void;
   checkPathName: (folderId: string) => boolean;
 }) => {
+  const { t } = useTranslation();
+  const { can } = usePermissions();
+  const canRename = can(item.id, "write");
+  const canDownload = can(item.id, "read");
+  const canDelete = can(item.id, "delete");
   return (
     <div>
       <Select
@@ -40,39 +46,54 @@ export const SelectOptions = ({
         }
         value=""
       >
-        <ShadTooltip content="Options" side="right" styleClasses="z-50">
+        <ShadTooltip
+          content={t("folder.options")}
+          side="right"
+          styleClasses="z-50"
+        >
           <SelectTrigger
-            className="w-fit"
+            className="h-6 w-6 min-h-[24px] min-w-[24px]"
             id={`options-trigger-${item.name}`}
-            data-testid="more-options-button"
+            data-testid={
+              "more-options-button" + `_${convertTestName(item?.name ?? "")}`
+            }
+            aria-label={t("folder.optionsFor", { name: item.name })}
           >
             <IconComponent
               name={"MoreHorizontal"}
               className={cn(
-                `w-4 stroke-[1.5] px-0 text-muted-foreground group-hover/menu-button:block group-hover/menu-button:text-foreground`,
+                `w-4 stroke-[1.5] px-0 text-muted-foreground group-hover/menu-button:block group-hover/menu-button:text-foreground group-focus-within/menu-button:block group-focus-within/menu-button:text-foreground`,
                 checkPathName(item.id!) ? "block" : "hidden",
               )}
             />
           </SelectTrigger>
         </ShadTooltip>
         <SelectContent align="end" alignOffset={-16} position="popper">
-          {item.name !== "My Projects" && (
-            <SelectItem
-              id="rename-button"
-              value="rename"
-              data-testid="btn-rename-folder"
-            >
-              <FolderSelectItem name="Rename" iconName="SquarePen" />
-            </SelectItem>
-          )}
-          <SelectItem value="download" data-testid="btn-download-folder">
-            <FolderSelectItem name="Download Content" iconName="Download" />
+          <SelectItem
+            id="rename-button"
+            value="rename"
+            data-testid="btn-rename-project"
+            className="text-xs"
+            disabled={!canRename}
+          >
+            <FolderSelectItem name={t("folder.rename")} iconName="SquarePen" />
           </SelectItem>
-          {index > 0 && (
-            <SelectItem value="delete" data-testid="btn-delete-folder">
-              <FolderSelectItem name="Delete" iconName="Trash2" />
-            </SelectItem>
-          )}
+          <SelectItem
+            value="download"
+            data-testid="btn-download-project"
+            className="text-xs"
+            disabled={!canDownload}
+          >
+            <FolderSelectItem name={t("folder.download")} iconName="Download" />
+          </SelectItem>
+          <SelectItem
+            value="delete"
+            data-testid="btn-delete-project"
+            className="text-xs"
+            disabled={!canDelete}
+          >
+            <FolderSelectItem name={t("folder.delete")} iconName="Trash2" />
+          </SelectItem>
         </SelectContent>
       </Select>
     </div>

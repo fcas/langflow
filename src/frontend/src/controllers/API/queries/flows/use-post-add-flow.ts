@@ -1,7 +1,7 @@
+import type { UseMutationResult } from "@tanstack/react-query";
+import type { ReactFlowJsonObject } from "@xyflow/react";
 import { useFolderStore } from "@/stores/foldersStore";
-import { useMutationFunctionType } from "@/types/api";
-import { UseMutationResult } from "@tanstack/react-query";
-import { ReactFlowJsonObject } from "@xyflow/react";
+import type { useMutationFunctionType } from "@/types/api";
 import { api } from "../../api";
 import { getURL } from "../../helpers/constants";
 import { UseRequestProcessor } from "../../services/request-processor";
@@ -15,6 +15,9 @@ interface IPostAddFlow {
   endpoint_name: string | undefined;
   icon: string | undefined;
   gradient: string | undefined;
+  tags: string[] | undefined;
+  locked?: boolean | null;
+  mcp_enabled: boolean | undefined;
 }
 
 export const usePostAddFlow: useMutationFunctionType<
@@ -34,6 +37,9 @@ export const usePostAddFlow: useMutationFunctionType<
       icon: payload.icon || null,
       gradient: payload.gradient || null,
       endpoint_name: payload.endpoint_name || null,
+      tags: payload.tags || null,
+      locked: payload.locked ?? null,
+      mcp_enabled: payload.mcp_enabled || null,
     });
     return response.data;
   };

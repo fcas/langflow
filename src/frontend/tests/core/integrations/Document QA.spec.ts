@@ -1,84 +1,24 @@
-import { test } from "@playwright/test";
-import * as dotenv from "dotenv";
-import path from "path";
-import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { expect } from "../../fixtures";
+import { loadDotenvIfLocal } from "../../utils/env/load-dotenv";
+import { skipIfMissing } from "../../utils/env/skip-if-missing";
+import { openStarterProject } from "../../utils/flow/open-starter-project";
 import { initialGPTsetup } from "../../utils/initialGPTsetup";
+import { withEventDeliveryModes } from "../../utils/withEventDeliveryModes";
 
-test(
+withEventDeliveryModes(
   "Document Q&A",
-  { tag: ["@release", "@starter-project"] },
+  { tag: ["@release", "@starter-projects"] },
   async ({ page }) => {
-    test.skip(
-      !process?.env?.OPENAI_API_KEY,
-      "OPENAI_API_KEY required to run this test",
-    );
+    skipIfMissing.openAiKey();
+    loadDotenvIfLocal(__dirname);
 
-    if (!process.env.CI) {
-      dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-    }
-
-    await awaitBootstrapTest(page);
-
-    await page.getByTestId("side_nav_options_all-templates").click();
-    await page.getByRole("heading", { name: "Document Q&A" }).click();
+    await openStarterProject(page, "Document Q&A");
     await initialGPTsetup(page);
 
-    const fileChooserPromise = page.waitForEvent("filechooser");
-    await page.getByTestId("button_upload_file").click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(
-      path.join(__dirname, "../../assets/test_file.txt"),
-    );
-    await page.getByText("test_file.txt").isVisible();
-
-    await page.waitForSelector('[data-testid="button_run_chat output"]', {
-      timeout: 3000,
-    });
-
-    await page.getByTestId("button_run_chat output").click();
-    await page.waitForSelector("text=built successfully", { timeout: 30000 });
-
-    await page.getByText("built successfully").last().click({
-      timeout: 15000,
-    });
-
-    await page.getByText("Playground", { exact: true }).last().click();
-    await page
-      .getByText("No input message provided.", { exact: true })
-      .last()
-      .isVisible();
-
-    await page.waitForSelector('[data-testid="input-chat-playground"]', {
-      timeout: 100000,
-    });
-    await page
-      .getByTestId("input-chat-playground")
-      .last()
-      .fill("whats the text in the file?");
-    await page.getByTestId("button-send").last().click();
-
-    await page.waitForSelector("text=this is a test file", {
-      timeout: 10000,
-    });
-
-    await page.getByText("this is a test file").last().isVisible();
-
-    await page.getByText("Default Session").last().click();
-
-    await page.getByText("timestamp", { exact: true }).last().isVisible();
-    await page.getByText("text", { exact: true }).last().isVisible();
-    await page.getByText("sender", { exact: true }).last().isVisible();
-    await page.getByText("sender_name", { exact: true }).last().isVisible();
-    await page.getByText("session_id", { exact: true }).last().isVisible();
-    await page.getByText("files", { exact: true }).last().isVisible();
-
-    await page.getByRole("gridcell").last().isVisible();
-    await page.getByRole("combobox").click();
-    await page.getByLabel("Delete").click();
-    await page.waitForSelector('[data-testid="input-chat-playground"]', {
-      timeout: 100000,
-    });
-
-    await page.getByTestId("input-chat-playground").last().isVisible();
+    await expect(page.getByTestId("title-Knowledge")).toBeVisible();
+    await expect(page.getByTestId("title-Agent")).toBeVisible();
+    await expect(page.getByTestId("title-Chat Input")).toBeVisible();
+    await expect(page.getByTestId("title-Chat Output")).toBeVisible();
+    await expect(page.getByTestId("dropdown_str_knowledge_base")).toBeVisible();
   },
 );

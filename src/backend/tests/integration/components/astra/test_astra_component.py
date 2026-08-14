@@ -1,16 +1,20 @@
-import os
-
 import pytest
-from astrapy.db import AstraDB
-from langchain_astradb import AstraDBVectorStore, CollectionVectorServiceOptions
+from astrapy import DataAPIClient
 from langchain_core.documents import Document
-from langflow.components.embeddings import OpenAIEmbeddingsComponent
-from langflow.components.vectorstores import AstraDBVectorStoreComponent
-from langflow.schema.data import Data
+from lfx.schema.data import Data
 
 from tests.api_keys import get_astradb_api_endpoint, get_astradb_application_token, get_openai_api_key
 from tests.integration.components.mock_components import TextToData
 from tests.integration.utils import ComponentInputHandle, run_single_component
+
+langchain_astradb = pytest.importorskip("langchain_astradb")
+lfx_datastax = pytest.importorskip("lfx_datastax")
+lfx_openai_embeddings = pytest.importorskip("lfx_openai.components.openai.openai")
+
+AstraDBVectorStore = langchain_astradb.AstraDBVectorStore
+VectorServiceOptions = langchain_astradb.VectorServiceOptions
+AstraDBVectorStoreComponent = lfx_datastax.AstraDBVectorStoreComponent
+OpenAIEmbeddingsComponent = lfx_openai_embeddings.OpenAIEmbeddingsComponent
 
 BASIC_COLLECTION = "test_basic"
 SEARCH_COLLECTION = "test_search"
@@ -30,14 +34,21 @@ ALL_COLLECTIONS = [
 
 @pytest.fixture
 def astradb_client():
-    client = AstraDB(api_endpoint=get_astradb_api_endpoint(), token=get_astradb_application_token())
-    yield client
+    api_client = DataAPIClient()
+    client = api_client.get_database(get_astradb_api_endpoint(), token=get_astradb_application_token())
+
+    yield client  # Provide the client to the test functions
+
+    # Cleanup: Drop all collections after tests
     for collection in ALL_COLLECTIONS:
-        client.delete_collection(collection)
+        try:  # noqa: SIM105
+            client.drop_collection(collection)
+        except Exception:  # noqa: S110
+            pass
 
 
 @pytest.mark.api_key_required
-async def test_base(astradb_client: AstraDB):
+async def test_base(astradb_client: DataAPIClient):
     application_token = get_astradb_application_token()
     api_endpoint = get_astradb_api_endpoint()
 
@@ -56,7 +67,7 @@ async def test_base(astradb_client: AstraDB):
     )
 
     assert results["search_results"] == []
-    assert astradb_client.collection(BASIC_COLLECTION)
+    assert astradb_client.get_collection(BASIC_COLLECTION)
 
 
 @pytest.mark.api_key_required
@@ -92,21 +103,20 @@ def test_astra_vectorize():
 
     store = None
     try:
+        # Get the vectorize options
         options = {"provider": "nvidia", "modelName": "NV-Embed-QA"}
-        options_comp = {"embedding_provider": "nvidia", "model": "NV-Embed-QA"}
 
         store = AstraDBVectorStore(
             collection_name=VECTORIZE_COLLECTION,
             api_endpoint=api_endpoint,
             token=application_token,
-            collection_vector_service_options=CollectionVectorServiceOptions.from_dict(options),
+            collection_vector_service_options=VectorServiceOptions._from_dict(options),
         )
 
         documents = [Document(page_content="test1"), Document(page_content="test2")]
         records = [Data.from_document(d) for d in documents]
 
         component = AstraDBVectorStoreComponent()
-        vectorize_options = component.build_vectorize_options(**options_comp)
 
         component.build(
             token=application_token,
@@ -115,9 +125,8 @@ def test_astra_vectorize():
             ingest_data=records,
             search_query="test",
             number_of_results=2,
-            pre_delete_collection=True,
         )
-        vector_store = component.build_vector_store(vectorize_options)
+        vector_store = component.build_vector_store()
         records = component.search_documents(vector_store=vector_store)
 
         assert len(records) == 2
@@ -141,26 +150,17 @@ def test_astra_vectorize_with_provider_api_key():
             "authentication": {"providerKey": "openai"},
         }
 
-        options_comp = {
-            "embedding_provider": "openai",
-            "model": "text-embedding-3-small",
-            "z_01_model_parameters": {},
-            "z_03_provider_api_key": "openai",
-            "z_04_authentication": {},
-        }
-
         store = AstraDBVectorStore(
             collection_name=VECTORIZE_COLLECTION_OPENAI,
             api_endpoint=api_endpoint,
             token=application_token,
-            collection_vector_service_options=CollectionVectorServiceOptions.from_dict(options),
-            collection_embedding_api_key=os.getenv("OPENAI_API_KEY"),
+            collection_vector_service_options=VectorServiceOptions._from_dict(options),
+            collection_embedding_api_key=get_openai_api_key(),
         )
         documents = [Document(page_content="test1"), Document(page_content="test2")]
         records = [Data.from_document(d) for d in documents]
 
         component = AstraDBVectorStoreComponent()
-        vectorize_options = component.build_vectorize_options(**options_comp)
 
         component.build(
             token=application_token,
@@ -169,10 +169,9 @@ def test_astra_vectorize_with_provider_api_key():
             ingest_data=records,
             search_query="test",
             number_of_results=2,
-            pre_delete_collection=True,
         )
 
-        vector_store = component.build_vector_store(vectorize_options)
+        vector_store = component.build_vector_store()
         records = component.search_documents(vector_store=vector_store)
 
         assert len(records) == 2
@@ -195,25 +194,18 @@ def test_astra_vectorize_passes_authentication():
             "parameters": {},
             "authentication": {"providerKey": "openai"},
         }
-        options_comp = {
-            "embedding_provider": "openai",
-            "model": "text-embedding-3-small",
-            "z_01_model_parameters": {},
-            "z_04_authentication": {"providerKey": "openai"},
-        }
 
         store = AstraDBVectorStore(
             collection_name=VECTORIZE_COLLECTION_OPENAI_WITH_AUTH,
             api_endpoint=api_endpoint,
             token=application_token,
-            collection_vector_service_options=CollectionVectorServiceOptions.from_dict(options),
+            collection_vector_service_options=VectorServiceOptions._from_dict(options),
         )
 
         documents = [Document(page_content="test1"), Document(page_content="test2")]
         records = [Data.from_document(d) for d in documents]
 
         component = AstraDBVectorStoreComponent()
-        vectorize_options = component.build_vectorize_options(**options_comp)
 
         component.build(
             token=application_token,
@@ -222,10 +214,9 @@ def test_astra_vectorize_passes_authentication():
             ingest_data=records,
             search_query="test",
             number_of_results=2,
-            pre_delete_collection=True,
         )
 
-        vector_store = component.build_vector_store(vectorize_options)
+        vector_store = component.build_vector_store()
         records = component.search_documents(vector_store=vector_store)
 
         assert len(records) == 2

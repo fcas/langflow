@@ -1,45 +1,155 @@
-import ForwardedIconComponent from "@/components/common/genericIconComponent";
-import { Button } from "@/components/ui/button";
-import { usePostValidateComponentCode } from "@/controllers/API/queries/nodes/use-post-validate-component-code";
+import { useUpdateNodeInternals } from "@xyflow/react";
+import { AnimatePresence, motion } from "framer-motion";
+import { cloneDeep } from "lodash";
+import { useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { processNodeAdvancedFields } from "@/CustomNodes/helpers/process-node-advanced-fields";
 import useUpdateAllNodes, {
-  UpdateNodesType,
+  type UpdateNodesType,
 } from "@/CustomNodes/hooks/use-update-all-nodes";
+import { Button } from "@/components/ui/button";
+import { usePostValidateComponentCode } from "@/controllers/API/queries/nodes/use-post-validate-component-code";
+import UpdateComponentModal from "@/modals/updateComponentModal";
 import useAlertStore from "@/stores/alertStore";
+import useFlowStore, {
+  completeNodeUpdate,
+  registerNodeUpdate,
+} from "@/stores/flowStore";
 import useFlowsManagerStore from "@/stores/flowsManagerStore";
-import useFlowStore from "@/stores/flowStore";
 import { useTypesStore } from "@/stores/typesStore";
+import { useUtilityStore } from "@/stores/utilityStore";
+import type { NodeDataType } from "@/types/flow";
 import { cn } from "@/utils/utils";
-import { useUpdateNodeInternals } from "@xyflow/react";
-import { useState } from "react";
+
+const CONTAINER_VARIANTS = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: 20 },
+};
 
 export default function UpdateAllComponents() {
+  const { t } = useTranslation();
   const { componentsToUpdate, nodes, edges, setNodes } = useFlowStore();
-  const updateNodeInternals = useUpdateNodeInternals();
   const templates = useTypesStore((state) => state.templates);
   const setErrorData = useAlertStore((state) => state.setErrorData);
-  const [loadingUpdate, setLoadingUpdate] = useState(false);
-
   const { mutateAsync: validateComponentCode } = usePostValidateComponentCode();
   const takeSnapshot = useFlowsManagerStore((state) => state.takeSnapshot);
 
+  const isBuilding = useFlowStore((state) => state.isBuilding);
+  const buildInfo = useFlowStore((state) => state.buildInfo);
+
+  const updateNodeInternals = useUpdateNodeInternals();
   const updateAllNodes = useUpdateAllNodes(setNodes, updateNodeInternals);
 
-  const [dismissed, setDismissed] = useState(false);
+  const [loadingUpdate, setLoadingUpdate] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
-  const handleUpdateAllComponents = () => {
+  const dismissedNodes = useFlowStore((state) => state.dismissedNodes);
+  const addDismissedNodes = useFlowStore((state) => state.addDismissedNodes);
+  const removeDismissedNodes = useFlowStore(
+    (state) => state.removeDismissedNodes,
+  );
+  const allowCustomComponents = useUtilityStore(
+    (state) => state.allowCustomComponents,
+  );
+
+  const allDismissed = useMemo(
+    () =>
+      componentsToUpdate.length > 0 &&
+      componentsToUpdate.every((component) =>
+        dismissedNodes.includes(component.id),
+      ),
+    [dismissedNodes, componentsToUpdate],
+  );
+
+  const componentsToUpdateFiltered = useMemo(
+    () =>
+      allowCustomComponents
+        ? componentsToUpdate.filter(
+            (component) =>
+              !component.blocked &&
+              !dismissedNodes.includes(component.id) &&
+              !component.userEdited,
+          )
+        : componentsToUpdate,
+    [componentsToUpdate, dismissedNodes, allowCustomComponents],
+  );
+
+  const blockedComponents = useMemo(
+    () => componentsToUpdateFiltered.filter((component) => component.blocked),
+    [componentsToUpdateFiltered],
+  );
+
+  const updatableComponents = useMemo(
+    () => componentsToUpdateFiltered.filter((component) => !component.blocked),
+    [componentsToUpdateFiltered],
+  );
+
+  const edgesUpdateRef = useRef({
+    numberOfEdgesBeforeUpdate: 0,
+    updateComponent: false,
+  });
+
+  useMemo(() => {
+    if (
+      edgesUpdateRef.current.numberOfEdgesBeforeUpdate > 0 &&
+      edges.length !== edgesUpdateRef.current.numberOfEdgesBeforeUpdate &&
+      edgesUpdateRef.current.updateComponent
+    ) {
+      useAlertStore.getState().setNoticeData({
+        title: t("errors.edgesLost"),
+      });
+
+      resetEdgesUpdateRef();
+    }
+  }, [edges]);
+
+  const getSuccessTitle = (updatedCount: number) => {
+    resetEdgesUpdateRef();
+    return t("updateComponents.successCount", { count: updatedCount });
+  };
+
+  const breakingChanges = updatableComponents.filter(
+    (component) => component.breakingChange,
+  );
+
+  const handleUpdateAllComponents = (confirmed?: boolean, ids?: string[]) => {
+    if (updatableComponents.length === 0) {
+      return;
+    }
+    if (!confirmed && breakingChanges.length > 0) {
+      setIsOpen(true);
+      return;
+    }
+    startEdgesUpdateRef();
+
     setLoadingUpdate(true);
     takeSnapshot();
 
     let updatedCount = 0;
     const updates: UpdateNodesType[] = [];
 
-    const updatePromises = componentsToUpdate.map((nodeId) => {
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node || node.type !== "genericNode") return Promise.resolve();
+    const nodesToUpdate = updatableComponents.filter(
+      (component) => ids?.includes(component.id) ?? true,
+    );
+
+    // Register all pending updates so buildFlow will wait for them
+    for (const nodeUpdate of nodesToUpdate) {
+      registerNodeUpdate(nodeUpdate.id);
+    }
+
+    const updatePromises = nodesToUpdate.map((nodeUpdate) => {
+      const node = nodes.find((n) => n.id === nodeUpdate.id);
+      if (!node || node.type !== "genericNode") {
+        completeNodeUpdate(nodeUpdate.id);
+        return Promise.resolve();
+      }
 
       const thisNodeTemplate = templates[node.data.type]?.template;
-      if (!thisNodeTemplate?.code) return Promise.resolve();
+      if (!thisNodeTemplate?.code) {
+        completeNodeUpdate(nodeUpdate.id);
+        return Promise.resolve();
+      }
 
       const currentCode = thisNodeTemplate.code.value;
 
@@ -50,10 +160,14 @@ export default function UpdateAllComponents() {
         })
           .then(({ data: resData, type }) => {
             if (resData && type) {
-              const newNode = processNodeAdvancedFields(resData, edges, nodeId);
+              const newNode = processNodeAdvancedFields(
+                resData,
+                edges,
+                nodeUpdate.id,
+              );
 
               updates.push({
-                nodeId,
+                nodeId: nodeUpdate.id,
                 newNode,
                 code: currentCode,
                 name: "code",
@@ -73,74 +187,162 @@ export default function UpdateAllComponents() {
 
     Promise.all(updatePromises)
       .then(() => {
-        if (updatedCount > 0) {
-          // Batch update all nodes at once
+        const updatedNodeIds = updates.map(({ nodeId }) => nodeId);
+
+        if (updatedNodeIds.length > 0) {
           updateAllNodes(updates);
+          removeDismissedNodes(updatedNodeIds);
 
           useAlertStore.getState().setSuccessData({
-            title: `Successfully updated ${updatedCount} component${
-              updatedCount > 1 ? "s" : ""
-            }`,
+            title: getSuccessTitle(updatedCount),
           });
         }
       })
       .catch((error) => {
         setErrorData({
-          title: "Error updating components",
+          title: t("errors.updateComponents"),
           list: [
-            "There was an error updating the components.",
-            "If the error persists, please report it on our Discord or GitHub.",
+            t("errors.updateComponentsList"),
+            t("errors.updateComponentsContact"),
           ],
         });
         console.error(error);
       })
       .finally(() => {
+        // Complete all pending updates regardless of success/failure
+        for (const nodeUpdate of nodesToUpdate) {
+          completeNodeUpdate(nodeUpdate.id);
+        }
         setLoadingUpdate(false);
       });
   };
 
-  if (componentsToUpdate.length === 0) return null;
+  const resetEdgesUpdateRef = () => {
+    edgesUpdateRef.current = {
+      numberOfEdgesBeforeUpdate: 0,
+      updateComponent: false,
+    };
+  };
+
+  const startEdgesUpdateRef = () => {
+    edgesUpdateRef.current = {
+      numberOfEdgesBeforeUpdate: edges.length,
+      updateComponent: true,
+    };
+  };
+
+  const handleDismissAllComponents = (
+    e: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    const ids = componentsToUpdateFiltered.map((component) => component.id);
+    addDismissedNodes(ids);
+    setNodes((oldNodes) =>
+      oldNodes.map((node) => {
+        if (ids.includes(node.id) && node.data?.node) {
+          const newNode = cloneDeep(node);
+          (newNode.data as NodeDataType).node!.edited = true;
+          return newNode;
+        }
+        return node;
+      }),
+    );
+    e.stopPropagation();
+  };
+
+  if (componentsToUpdateFiltered.length === 0) return null;
+
+  const shouldHide =
+    (allowCustomComponents && allDismissed) ||
+    isBuilding ||
+    buildInfo?.error ||
+    buildInfo?.success;
+
+  const showDismissedWarning = !allowCustomComponents && allDismissed;
 
   return (
-    <div
-      className={cn(
-        "absolute bottom-2 left-1/2 z-50 flex w-[500px] -translate-x-1/2 items-center gap-8 rounded-lg bg-warning px-4 py-2 text-sm font-medium text-warning-foreground shadow-md transition-all ease-in",
-        dismissed && "translate-y-[120%]",
+    <AnimatePresence mode="wait">
+      {!shouldHide && (
+        <div className="absolute bottom-16 left-1/2 z-50 w-[530px] -translate-x-1/2">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            variants={CONTAINER_VARIANTS}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className={cn(
+              "flex items-center justify-between gap-6 rounded-lg border bg-background px-4 py-3 text-sm shadow-md",
+              (showDismissedWarning ||
+                !allowCustomComponents ||
+                updatableComponents.some(
+                  (component) => component.breakingChange,
+                )) &&
+                "border-accent-amber-foreground",
+            )}
+          >
+            <div className="flex flex-col gap-1">
+              <span className="font-semibold">
+                {showDismissedWarning
+                  ? blockedComponents.length > 0
+                    ? t("updateComponents.customComponentsDisabled")
+                    : t("updateComponents.upgradeRequired")
+                  : t("updateComponents.flowNeedsReview")}
+              </span>
+              {!showDismissedWarning && (
+                <div className="flex flex-col font-normal text-muted-foreground">
+                  {blockedComponents.length > 0 && (
+                    <span>
+                      {t("updateComponents.blockedCannotRun", {
+                        count: blockedComponents.length,
+                      })}
+                    </span>
+                  )}
+                  {updatableComponents.length > 0 && (
+                    <span>
+                      {t("updateComponents.updatableCount", {
+                        count: updatableComponents.length,
+                      })}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              {!allDismissed && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={handleDismissAllComponents}
+                >
+                  {componentsToUpdateFiltered.length > 1
+                    ? t("updateComponents.dismissAll")
+                    : t("updateComponents.dismiss")}
+                </Button>
+              )}
+              {updatableComponents.length > 0 && (
+                <Button
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => handleUpdateAllComponents()}
+                  loading={loadingUpdate}
+                  data-testid="update-all-button"
+                >
+                  {breakingChanges.length > 0
+                    ? t("updateComponents.reviewAll")
+                    : t("updateComponents.updateAll")}
+                </Button>
+              )}
+            </div>
+          </motion.div>
+          <UpdateComponentModal
+            isMultiple={true}
+            open={isOpen}
+            setOpen={setIsOpen}
+            onUpdateNode={(ids) => handleUpdateAllComponents(true, ids)}
+            components={updatableComponents}
+          />
+        </div>
       )}
-    >
-      <div className="flex items-center gap-3">
-        <ForwardedIconComponent
-          name="AlertTriangle"
-          className="!h-[18px] !w-[18px] shrink-0"
-          strokeWidth={1.5}
-        />
-        <span>
-          {componentsToUpdate.length} component
-          {componentsToUpdate.length > 1 ? "s are" : " is"} ready to update
-        </span>
-      </div>
-      <div className="flex items-center gap-4">
-        <Button
-          variant="link"
-          size="icon"
-          className="shrink-0 text-sm text-warning-foreground"
-          onClick={() => {
-            setDismissed(true);
-          }}
-        >
-          Dismiss
-        </Button>
-        <Button
-          variant="warning"
-          size="sm"
-          className="shrink-0"
-          onClick={handleUpdateAllComponents}
-          loading={loadingUpdate}
-          data-testid="update-all-button"
-        >
-          Update All
-        </Button>
-      </div>
-    </div>
+    </AnimatePresence>
   );
 }

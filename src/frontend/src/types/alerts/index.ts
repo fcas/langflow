@@ -9,6 +9,7 @@ export type NoticeAlertType = {
   link?: string;
   id: string;
   removeAlert: (id: string) => void;
+  list?: Array<string>;
 };
 export type SuccessAlertType = {
   title: string;
@@ -21,7 +22,7 @@ export type SingleAlertComponentType = {
 };
 export type AlertDropdownType = {
   children: JSX.Element;
-  notificationRef?: React.RefObject<HTMLDivElement>;
+  notificationRef?: React.RefObject<HTMLDivElement | null>;
   onClose?: () => void;
 };
 export type AlertItemType = {

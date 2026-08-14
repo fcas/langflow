@@ -1,32 +1,22 @@
-import { expect, Page, test } from "@playwright/test";
-import * as dotenv from "dotenv";
-import path from "path";
-import { addNewApiKeys } from "../../utils/add-new-api-keys";
-import { adjustScreenView } from "../../utils/adjust-screen-view";
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../fixtures";
 import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { TEXTS } from "../../utils/constants/texts";
+import { loadDotenvIfLocal } from "../../utils/env/load-dotenv";
+import { skipIfMissing } from "../../utils/env/skip-if-missing";
 import { initialGPTsetup } from "../../utils/initialGPTsetup";
-import { removeOldApiKeys } from "../../utils/remove-old-api-keys";
-import { selectGptModel } from "../../utils/select-gpt-model";
-import { updateOldComponents } from "../../utils/update-old-components";
+import { withEventDeliveryModes } from "../../utils/withEventDeliveryModes";
 
-test(
+withEventDeliveryModes(
   "Travel Planning Agent",
-  { tag: ["@release", "@starter-project"] },
+  { tag: ["@release", "@starter-projects"] },
   async ({ page }) => {
-    test.skip(
-      !process?.env?.OPENAI_API_KEY,
-      "OPENAI_API_KEY required to run this test",
-    );
-
+    skipIfMissing.openAiKey();
     test.skip(
       !process?.env?.SEARCH_API_KEY,
       "SEARCH_API_KEY required to run this test",
     );
-
-    if (!process.env.CI) {
-      dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-    }
-
+    loadDotenvIfLocal(__dirname);
     await page.goto("/");
     await awaitBootstrapTest(page);
 
@@ -36,7 +26,7 @@ test(
       .last()
       .click();
 
-    await page.waitForSelector('[data-testid="fit_view"]', {
+    await page.waitForSelector('[data-testid="canvas_controls_dropdown"]', {
       timeout: 100000,
     });
 
@@ -63,19 +53,17 @@ test(
     await page.getByTestId("button_run_chat output").last().click();
 
     if (await checkRateLimit(page)) {
-      console.log("Rate limit detected, skipping test");
+      console.warn("Rate limit detected, skipping test");
       test.skip();
     }
 
-    await page.waitForSelector("text=built successfully", {
+    await page.waitForSelector(`text=${TEXTS.toastBuiltSuccessfully}`, {
       timeout: 60000 * 3,
     });
 
-    await page.getByText("built successfully").last().click({
-      timeout: 15000,
-    });
-
-    await page.getByText("Playground", { exact: true }).last().click();
+    await page
+      .getByRole("button", { name: TEXTS.playground, exact: true })
+      .click();
 
     await page.waitForSelector("text=default session", {
       timeout: 30000,
@@ -84,8 +72,8 @@ test(
     const output = await page.getByTestId("div-chat-message").allTextContents();
     const outputText = output.join("\n");
 
-    expect(outputText.toLowerCase()).toContain("weather");
-    expect(outputText.toLowerCase()).toContain("budget");
+    expect(outputText.toLowerCase()).toContain("travel");
+    expect(outputText.toLowerCase()).toContain("day");
 
     expect(outputText.toLowerCase()).toContain(randomCity.toLowerCase());
     expect(outputText.toLowerCase()).toContain(randomCity2.toLowerCase());

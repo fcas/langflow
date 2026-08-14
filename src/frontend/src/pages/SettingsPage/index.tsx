@@ -1,13 +1,19 @@
+import { useTranslation } from "react-i18next";
+import { Outlet, type To } from "react-router-dom";
 import SideBarButtonsComponent from "@/components/core/sidebarComponent";
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { ENABLE_PROFILE_ICONS } from "@/customization/feature-flags";
+import { CustomStoreSidebar } from "@/customization/components/custom-store-sidebar";
+import {
+  ENABLE_DATASTAX_LANGFLOW,
+  ENABLE_LANGFLOW_STORE,
+  ENABLE_PROFILE_ICONS,
+} from "@/customization/feature-flags";
 import useAuthStore from "@/stores/authStore";
 import { useStoreStore } from "@/stores/storeStore";
-import { Outlet } from "react-router-dom";
 import ForwardedIconComponent from "../../components/common/genericIconComponent";
 import PageLayout from "../../components/common/pageLayout";
-
 export default function SettingsPage(): JSX.Element {
+  const { t } = useTranslation();
   const autoLogin = useAuthStore((state) => state.autoLogin);
   const hasStore = useStoreStore((state) => state.hasStore);
 
@@ -22,7 +28,7 @@ export default function SettingsPage(): JSX.Element {
 
   if (showGeneralSettings) {
     sidebarNavItems.push({
-      title: "General",
+      title: t("settings.nav.general"),
       href: "/settings/general",
       icon: (
         <ForwardedIconComponent
@@ -35,7 +41,27 @@ export default function SettingsPage(): JSX.Element {
 
   sidebarNavItems.push(
     {
-      title: "Global Variables",
+      title: t("settings.nav.mcpServers"),
+      href: "/settings/mcp-servers",
+      icon: (
+        <ForwardedIconComponent
+          name="Mcp"
+          className="w-4 flex-shrink-0 justify-start stroke-[1.5]"
+        />
+      ),
+    },
+    {
+      title: t("settings.nav.mcpClient"),
+      href: "/settings/mcp-client",
+      icon: (
+        <ForwardedIconComponent
+          name="Terminal"
+          className="w-4 flex-shrink-0 justify-start stroke-[1.5]"
+        />
+      ),
+    },
+    {
+      title: t("settings.nav.globalVariables"),
       href: "/settings/global-variables",
       icon: (
         <ForwardedIconComponent
@@ -45,17 +71,28 @@ export default function SettingsPage(): JSX.Element {
       ),
     },
     {
-      title: "Langflow API",
-      href: "/settings/api-keys",
+      title: t("settings.nav.modelProviders"),
+      href: "/settings/model-providers",
       icon: (
         <ForwardedIconComponent
-          name="Key"
+          name="BrainCircuit"
           className="w-4 flex-shrink-0 justify-start stroke-[1.5]"
         />
       ),
     },
     {
-      title: "Shortcuts",
+      title: t("settings.nav.dbProviders"),
+      href: "/settings/db-providers",
+      icon: (
+        <ForwardedIconComponent
+          name="Database"
+          className="w-4 flex-shrink-0 justify-start stroke-[1.5]"
+        />
+      ),
+    },
+
+    {
+      title: t("settings.nav.shortcuts"),
       href: "/settings/shortcuts",
       icon: (
         <ForwardedIconComponent
@@ -65,7 +102,7 @@ export default function SettingsPage(): JSX.Element {
       ),
     },
     {
-      title: "Messages",
+      title: t("settings.nav.messages"),
       href: "/settings/messages",
       icon: (
         <ForwardedIconComponent
@@ -75,11 +112,18 @@ export default function SettingsPage(): JSX.Element {
       ),
     },
   );
+
+  // TODO: Remove this on cleanup
+  if (!ENABLE_DATASTAX_LANGFLOW) {
+    const langflowItems = CustomStoreSidebar(true, ENABLE_LANGFLOW_STORE);
+    sidebarNavItems.splice(2, 0, ...langflowItems);
+  }
+
   return (
     <PageLayout
-      backTo={"/"}
-      title="Settings"
-      description="Manage the general settings for Langflow."
+      backTo={-1 as To}
+      title={t("settings.title")}
+      description={t("settings.description")}
     >
       <SidebarProvider width="15rem" defaultOpen={false}>
         <SideBarButtonsComponent items={sidebarNavItems} />

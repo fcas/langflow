@@ -1,5 +1,4 @@
-import { FlowType } from "@/types/flow";
-import { FolderType } from "../../../pages/MainPage/entities";
+import type { FolderType } from "../../../pages/MainPage/entities";
 
 export type FoldersStoreType = {
   myCollectionId: string | null;
@@ -14,4 +13,5 @@ export type FoldersStoreType = {
   setStarterProjectId: (id: string) => void;
   folders: FolderType[];
   setFolders: (folders: FolderType[]) => void;
+  resetStore: () => void;
 };

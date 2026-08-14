@@ -4,26 +4,34 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from fastapi import HTTPException
+from lfx.log.logger import logger
 from pydantic.v1 import BaseModel, Field, create_model
-from sqlmodel import select
+from sqlalchemy.orm import aliased
+from sqlmodel import asc, desc, select
 
 from langflow.schema.schema import INPUT_FIELD_NAME
-from langflow.services.database.models.flow import Flow
-from langflow.services.database.models.flow.model import FlowRead
+from langflow.services.database.models.flow.model import Flow, FlowRead, FlowType
 from langflow.services.deps import get_settings_service, session_scope
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from langflow.graph.graph.base import Graph
-    from langflow.graph.schema import RunOutputs
-    from langflow.graph.vertex.base import Vertex
-    from langflow.schema import Data
+    from lfx.graph.graph.base import Graph
+    from lfx.graph.schema import RunOutputs
+    from lfx.graph.vertex.base import Vertex
+
+    from langflow.services.database.models.user.model import User
+
+from langflow.schema.data import Data
 
 INPUT_TYPE_MAP = {
     "ChatInput": {"type_hint": "Optional[str]", "default": '""'},
     "TextInput": {"type_hint": "Optional[str]", "default": '""'},
     "JSONInput": {"type_hint": "Optional[dict]", "default": "{}"},
+}
+SORT_DISPATCHER = {
+    "asc": asc,
+    "desc": desc,
 }
 
 
@@ -43,11 +51,179 @@ async def list_flows(*, user_id: str | None = None) -> list[Data]:
         raise ValueError(msg) from e
 
 
+async def _list_flows_in_flow_folder(
+    *,
+    user_id: str | None,
+    flow_id: str | None,
+    order_params: dict | None,
+    a2a_only: bool,
+) -> list[Data]:
+    """Query flows sharing ``flow_id``'s folder, optionally only those published as A2A agents."""
+    if not user_id:
+        msg = "Session is invalid"
+        raise ValueError(msg)
+    if not flow_id:
+        msg = "Flow ID is required"
+        raise ValueError(msg)
+    try:
+        async with session_scope() as session:
+            uuid_user_id = UUID(user_id) if isinstance(user_id, str) else user_id
+            uuid_flow_id = UUID(flow_id) if isinstance(flow_id, str) else flow_id
+            # get all flows belonging to the specified user
+            # and inside the same folder as the specified flow
+            flow_ = aliased(Flow)  # flow table alias, used to retrieve the folder
+            stmt = (
+                select(Flow.id, Flow.name, Flow.updated_at)
+                .join(flow_, Flow.folder_id == flow_.folder_id)
+                .where(flow_.id == uuid_flow_id)
+                .where(flow_.user_id == uuid_user_id)
+                .where(Flow.user_id == uuid_user_id)
+                .where(Flow.id != uuid_flow_id)
+            )
+            if a2a_only:
+                stmt = stmt.where(Flow.a2a_enabled == True)  # noqa: E712
+            # sort flows by the specified column and direction
+            if order_params is not None:
+                sort_col = getattr(Flow, order_params.get("column", "updated_at"), Flow.updated_at)
+                sort_dir = SORT_DISPATCHER.get(order_params.get("direction", "desc"), desc)
+                stmt = stmt.order_by(sort_dir(sort_col))
+
+            flows = (await session.exec(stmt)).all()
+            return [Data(data=dict(flow._mapping)) for flow in flows]  # noqa: SLF001
+    except Exception as e:
+        msg = f"Error listing {'A2A agents' if a2a_only else 'flows'}: {e}"
+        raise ValueError(msg) from e
+
+
+async def list_flows_by_flow_folder(
+    *,
+    user_id: str | None = None,
+    flow_id: str | None = None,
+    order_params: dict | None = {"column": "updated_at", "direction": "desc"},  # noqa: B006
+) -> list[Data]:
+    """List the user's other flows in the same folder as ``flow_id``."""
+    return await _list_flows_in_flow_folder(user_id=user_id, flow_id=flow_id, order_params=order_params, a2a_only=False)
+
+
+async def list_a2a_agents_by_flow_folder(
+    *,
+    user_id: str | None = None,
+    flow_id: str | None = None,
+    order_params: dict | None = {"column": "updated_at", "direction": "desc"},  # noqa: B006
+) -> list[Data]:
+    """List flows published as A2A agents in the same folder as ``flow_id``.
+
+    Same shape as ``list_flows_by_flow_folder`` but restricted to flows the user has turned on
+    as A2A agents (``a2a_enabled``), so the A2A Agent component offers only real agents to call
+    internally, not every flow (that would just be Run Flow).
+    """
+    return await _list_flows_in_flow_folder(user_id=user_id, flow_id=flow_id, order_params=order_params, a2a_only=True)
+
+
+async def list_flows_by_folder_id(
+    *, user_id: str | None = None, folder_id: str | None = None, order_params: dict | None = None
+) -> list[Data]:
+    if not user_id:
+        msg = "Session is invalid"
+        raise ValueError(msg)
+    if not folder_id:
+        msg = "Folder ID is required"
+        raise ValueError(msg)
+
+    if order_params is None:
+        order_params = {"column": "updated_at", "direction": "desc"}
+
+    try:
+        async with session_scope() as session:
+            uuid_user_id = UUID(user_id) if isinstance(user_id, str) else user_id
+            uuid_folder_id = UUID(folder_id) if isinstance(folder_id, str) else folder_id
+            stmt = (
+                select(Flow.id, Flow.name, Flow.updated_at)
+                .where(Flow.user_id == uuid_user_id)
+                .where(Flow.folder_id == uuid_folder_id)
+            )
+            if order_params is not None:
+                sort_col = getattr(Flow, order_params.get("column", "updated_at"), Flow.updated_at)
+                sort_dir = SORT_DISPATCHER.get(order_params.get("direction", "desc"), desc)
+                stmt = stmt.order_by(sort_dir(sort_col))
+
+            flows = (await session.exec(stmt)).all()
+            return [Data(data=dict(flow._mapping)) for flow in flows]  # noqa: SLF001
+    except Exception as e:
+        msg = f"Error listing flows: {e}"
+        raise ValueError(msg) from e
+
+
+async def get_flow_by_id_or_name(
+    *,
+    user_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
+) -> Data | None:
+    if not user_id:
+        msg = "Session is invalid"
+        raise ValueError(msg)
+    if not (flow_id or flow_name):
+        msg = "Flow ID or Flow Name is required"
+        raise ValueError(msg)
+
+    # set user provided flow id or flow name.
+    # if both are provided, flow_id is used.
+    attr, val = None, None
+    if flow_name:
+        attr = "name"
+        val = flow_name
+    if flow_id:
+        attr = "id"
+        val = flow_id
+    if not (attr and val):
+        msg = "Flow id or Name is required"
+        raise ValueError(msg)
+    try:
+        async with session_scope() as session:
+            uuid_user_id = UUID(user_id) if isinstance(user_id, str) else user_id  # type: ignore[assignment]
+            uuid_flow_id_or_name = val  # type: ignore[assignment]
+            if isinstance(val, str) and attr == "id":
+                uuid_flow_id_or_name = UUID(val)  # type: ignore[assignment]
+            stmt = select(Flow).where(Flow.user_id == uuid_user_id).where(getattr(Flow, attr) == uuid_flow_id_or_name)
+            flow = (await session.exec(stmt)).first()
+            return flow.to_data() if flow else None
+
+    except Exception as e:
+        msg = f"Error getting flow by id: {e}"
+        raise ValueError(msg) from e
+
+
+async def _build_graph_from_authorized_flow(
+    *,
+    caller: User,  # noqa: ARG001
+    flow: Flow,
+    flow_id: str,
+    user_id: str,
+    tweaks: dict | None,
+) -> Graph:
+    """Build a Graph from an already-loaded flow row (permission enforced by decorator)."""
+    from lfx.graph.graph.base import Graph
+
+    from langflow.processing.process import process_tweaks
+
+    graph_data = flow.data
+    if not graph_data:
+        msg = f"Flow {flow_id} not found"
+        raise ValueError(msg)
+    if tweaks:
+        graph_data = process_tweaks(graph_data=graph_data, tweaks=tweaks)
+    return Graph.from_payload(graph_data, flow_id=flow_id, user_id=user_id)
+
+
 async def load_flow(
     user_id: str, flow_id: str | None = None, flow_name: str | None = None, tweaks: dict | None = None
 ) -> Graph:
-    from langflow.graph.graph.base import Graph
-    from langflow.processing.process import process_tweaks
+    """Load a flow graph after authorizing EXECUTE for the caller."""
+    from langflow.services.authorization import FlowAction
+    from langflow.services.authorization.decorators import requires_flow_permission
+    from langflow.services.authorization.fetch import authorized_or_owner_scoped
+    from langflow.services.database.models.user.model import User
 
     if not flow_id and not flow_name:
         msg = "Flow ID or Flow Name is required"
@@ -58,14 +234,42 @@ async def load_flow(
             msg = f"Flow {flow_name} not found"
             raise ValueError(msg)
 
+    uuid_user_id = UUID(user_id) if isinstance(user_id, str) else user_id
+    uuid_flow_id = UUID(flow_id) if isinstance(flow_id, str) else flow_id
+
     async with session_scope() as session:
-        graph_data = flow.data if (flow := await session.get(Flow, flow_id)) else None
-    if not graph_data:
-        msg = f"Flow {flow_id} not found"
-        raise ValueError(msg)
-    if tweaks:
-        graph_data = process_tweaks(graph_data=graph_data, tweaks=tweaks)
-    return Graph.from_payload(graph_data, flow_id=flow_id, user_id=user_id)
+        flow = await authorized_or_owner_scoped(
+            session,
+            Flow,
+            id_column=Flow.id,
+            resource_id=uuid_flow_id,
+            owner_column=Flow.user_id,
+            owner_id=uuid_user_id,
+        )
+        if flow is None:
+            msg = f"Flow {flow_id} not found"
+            raise ValueError(msg)
+
+        caller = await session.get(User, uuid_user_id)
+        if caller is None:
+            msg = "Session is invalid"
+            raise ValueError(msg)
+
+    build_graph = requires_flow_permission(
+        FlowAction.EXECUTE,
+        user_param="caller",
+        flow_param="flow",
+        forbidden_as_not_found=True,
+        not_found_template=f"Flow {flow_id} not found",
+    )(_build_graph_from_authorized_flow)
+
+    return await build_graph(
+        caller=caller,
+        flow=flow,
+        flow_id=flow_id,
+        user_id=user_id,
+        tweaks=tweaks,
+    )
 
 
 async def find_flow(flow_name: str, user_id: str) -> str | None:
@@ -121,6 +325,11 @@ async def run_flow(
     ]
 
     fallback_to_env_vars = get_settings_service().settings.fallback_to_env_var
+
+    from lfx.run.hitl import raise_if_nested_hitl_unsupported
+
+    # A nested run cannot pause: a Human Input in here would silently not pause. Fail loud instead.
+    raise_if_nested_hitl_unsupported(graph)
 
     return await graph.arun(
         inputs_list,
@@ -180,7 +389,7 @@ async def flow_function({func_args}):
     tweaks = {{ {arg_mappings} }}
     from langflow.helpers.flow import run_flow
     from langchain_core.tools import ToolException
-    from langflow.base.flow_processing.utils import build_data_from_result_data, format_flow_output_data
+    from lfx.base.flow_processing.utils import build_data_from_result_data, format_flow_output_data
     try:
         run_outputs = await run_flow(
             tweaks={{key: {{'input_value': value}} for key, value in tweaks.items()}},
@@ -275,17 +484,72 @@ def get_arg_names(inputs: list[Vertex]) -> list[dict[str, str]]:
     ]
 
 
-async def get_flow_by_id_or_endpoint_name(flow_id_or_name: str, user_id: str | UUID | None = None) -> FlowRead | None:
+async def get_flow_by_id_or_endpoint_name(
+    flow_id_or_name: str,
+    user_id: str | UUID | None = None,
+    *,
+    widen_for_shares: bool = False,
+) -> FlowRead:
+    """Resolve a flow by UUID or endpoint_name.
+
+    By default this is owner-scoped (``user_id`` must match the flow owner)
+    even when an authorization plugin is registered.  Callers that
+    immediately follow up with ``ensure_flow_permission(...)`` and therefore
+    *want* the widening — so a shared flow becomes reachable — can opt in by
+    passing ``widen_for_shares=True``.  Helpers that read ``flow.data`` without
+    a subsequent permission check (e.g. agentic MCP tools) must leave the
+    default, otherwise widening leaks graph metadata for another user's flow
+    before any policy decision runs.
+
+    SECURITY — ``user_id``: passing ``user_id=None`` disables owner scoping and
+    resolves the flow by id/endpoint_name ALONE (any user's flow). This is an
+    intentional contract for trusted internal callers, but it means every caller
+    MUST pass the authenticated user's id. Never wire this as a FastAPI
+    ``Depends`` whose ``user_id`` comes from a request-controlled (and possibly
+    unset) query param, and never forward a caller-supplied ``user_id`` that was
+    not derived from the authenticated identity — either reintroduces a flow
+    IDOR.
+    """
+    from langflow.services.deps import get_authorization_service
+
+    authz = get_authorization_service()
+    # Widening also requires the plugin contract to advertise cross-user fetch
+    # AND AUTHZ_ENABLED to be on, in addition to the opt-in flag above.
+    share_aware = widen_for_shares and await authz.supports_cross_user_fetch() and await authz.is_enabled()
+
     async with session_scope() as session:
-        endpoint_name = None
+        # SECURITY: previously the UUID branch below called
+        # ``session.get(Flow, flow_id)`` with no ownership check, so any
+        # authenticated caller could resolve any other user's flow by UUID.
+        # The endpoint_name branch scoped by ``user_id`` only when a truthy
+        # value was passed, so callers using this as a FastAPI ``Depends``
+        # (which resolves ``user_id`` from a query param that no one sets) had
+        # the same hole on both branches.  Normalize ``user_id`` once and
+        # enforce it on both branches -- returning None on cross-user lookup
+        # so the shared 404 below fires and we don't disclose existence of
+        # another user's flow.
+        uuid_user_id: UUID | None = None
+        if user_id is not None:
+            # Malformed user_id -- e.g. ``?user_id=foo`` on a legacy Depends
+            # route -- previously raised a raw ValueError (500 to the client).
+            # Fail closed: convert to 404 so we never disclose a flow to a
+            # caller whose identity we can't resolve.
+            try:
+                uuid_user_id = UUID(user_id) if isinstance(user_id, str) else user_id
+            except (ValueError, AttributeError) as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Flow identifier {flow_id_or_name} not found",
+                ) from exc
         try:
             flow_id = UUID(flow_id_or_name)
             flow = await session.get(Flow, flow_id)
+            if flow is not None and uuid_user_id is not None and not share_aware and flow.user_id != uuid_user_id:
+                flow = None
         except ValueError:
             endpoint_name = flow_id_or_name
             stmt = select(Flow).where(Flow.endpoint_name == endpoint_name)
-            if user_id:
-                uuid_user_id = UUID(user_id) if isinstance(user_id, str) else user_id
+            if uuid_user_id is not None and not share_aware:
                 stmt = stmt.where(Flow.user_id == uuid_user_id)
             flow = (await session.exec(stmt)).first()
         if flow is None:
@@ -314,3 +578,122 @@ async def generate_unique_flow_name(flow_name, user_id, session):
         # If a flow with the name already exists, append (n) to the name and increment n
         flow_name = f"{original_name} ({n})"
         n += 1
+
+
+def _get_flow_input_nodes(flow: Flow) -> list[Vertex]:
+    from lfx.graph.graph.base import Graph
+
+    graph = Graph.from_payload(flow.data or {})
+    return [vertex for vertex in graph.vertices if vertex.is_input]
+
+
+def _is_mcp_input_field(field_data: Any) -> bool:
+    return isinstance(field_data, dict) and field_data.get("show", False) and not field_data.get("advanced", False)
+
+
+def get_flow_input_tweaks(flow: Flow, inputs: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Map advertised MCP inputs to node-scoped flow tweaks."""
+    tweaks: dict[str, dict[str, Any]] = {}
+    for node in _get_flow_input_nodes(flow):
+        template = node.data["node"]["template"]
+        node_tweaks = {
+            field_name: inputs[field_name]
+            for field_name, field_data in template.items()
+            if field_name in inputs and _is_mcp_input_field(field_data)
+        }
+        if node_tweaks:
+            tweaks[node.id] = node_tweaks
+
+    return tweaks
+
+
+def json_schema_from_flow(flow: Flow) -> dict:
+    """Generate JSON schema from flow input nodes."""
+    properties = {}
+    required = []
+    for node in _get_flow_input_nodes(flow):
+        node_data = node.data["node"]
+        template = node_data["template"]
+
+        for field_name, field_data in template.items():
+            if _is_mcp_input_field(field_data):
+                field_type = field_data.get("type", "string")
+                properties[field_name] = {
+                    "type": field_type,
+                    "description": field_data.get("info", f"Input for {field_name}"),
+                }
+                # Update field_type in properties after determining the JSON Schema type
+                if field_type == "str":
+                    field_type = "string"
+                elif field_type == "int":
+                    field_type = "integer"
+                elif field_type == "float":
+                    field_type = "number"
+                elif field_type == "bool":
+                    field_type = "boolean"
+                else:
+                    logger.warning(f"Unknown field type: {field_type} defaulting to string")
+                    field_type = "string"
+                properties[field_name]["type"] = field_type
+
+                if field_data.get("required", False):
+                    required.append(field_name)
+
+    if "session_id" not in properties:
+        properties["session_id"] = {
+            "type": "string",
+            "description": (
+                "Optional session identifier used to persist conversation "
+                "history across tool calls. Omit to start a new session."
+            ),
+        }
+
+    return {"type": "object", "properties": properties, "required": required}
+
+
+# Built-in agents matched by their component ``name`` (stored as ``node.data.type``). The name is the
+# stable flow-matching identifier and never changes, so this classifies an agent flow even when the
+# node's stored source was saved by an older build and no longer evaluates. Custom agent components
+# (an unknown name) still fall through to the eval-based check below.
+_AGENT_TYPE_NAMES = frozenset({"Agent"})
+
+
+def suggest_flow_type(flow_data: dict | None) -> FlowType:
+    """Suggest ``agent`` vs ``workflow`` for a flow based on its graph contents.
+
+    Returns ``FlowType.AGENT`` if any node is a known agent component (matched by its stable
+    ``node.data.type`` name) or resolves to a subclass of ``LCAgentComponent``, else
+    ``FlowType.WORKFLOW``. This is a UI default suggestion only, never the stored source of truth, so
+    it never raises: any node it cannot resolve is skipped and the flow falls back to ``WORKFLOW``.
+    A custom component's class is recovered from its own stored source
+    (``node.data.node.template.code.value``) via ``eval_custom_component_code``, which evaluates the
+    class definition without instantiating or running it; the name fast-path handles flows whose
+    stored code predates the lfx module split and no longer evaluates.
+    """
+    from lfx.base.agents.agent import LCAgentComponent
+    from lfx.custom.eval import eval_custom_component_code
+
+    nodes = (flow_data or {}).get("nodes") or []
+    for node in nodes:
+        node_data = node.get("data") or {}
+        # Version-stable fast path before the fragile eval: a built-in agent classifies by name even
+        # if its stored code can't be evaluated in this build.
+        if node_data.get("type") in _AGENT_TYPE_NAMES:
+            return FlowType.AGENT
+        try:
+            code = node_data["node"]["template"]["code"]["value"]
+        except (KeyError, TypeError):
+            continue
+        if not code:
+            continue
+        try:
+            component_class = eval_custom_component_code(code)
+        except Exception:  # noqa: BLE001 - a suggestion must never fail the caller
+            logger.debug("suggest_flow_type: skipping a node whose code could not be evaluated", exc_info=True)
+            continue
+        try:
+            if issubclass(component_class, LCAgentComponent):
+                return FlowType.AGENT
+        except TypeError:
+            continue
+    return FlowType.WORKFLOW

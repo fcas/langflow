@@ -1,5 +1,4 @@
-import { FlowType } from "@/types/flow";
-import { storeComponent } from "../../../../../types/store";
+import type { FlowType } from "@/types/flow";
 import { cn } from "../../../../../utils/utils";
 import ForwardedIconComponent from "../../../../common/genericIconComponent";
 import { Card, CardHeader, CardTitle } from "../../../../ui/card";

@@ -1,6 +1,6 @@
-import { PopoverAnchor } from "@radix-ui/react-popover";
 import Fuse from "fuse.js";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../../../../utils/utils";
 import { default as ForwardedIconComponent } from "../../../../common/genericIconComponent";
 import ShadTooltip from "../../../../common/shadTooltipComponent";
@@ -18,7 +18,7 @@ import {
   PopoverContentWithoutPortal,
   PopoverTrigger,
 } from "../../../../ui/popover";
-import { InputProps, MultiselectComponentType } from "../../types";
+import type { InputProps, MultiselectComponentType } from "../../types";
 
 export default function MultiselectComponent({
   disabled,
@@ -28,15 +28,18 @@ export default function MultiselectComponent({
   combobox,
   editNode = false,
   id = "",
-}: InputProps<string[], MultiselectComponentType>): JSX.Element {
+  showParameter = true,
+  hideOnSelection,
+  inspectionPanel,
+}: InputProps<string[], MultiselectComponentType>): JSX.Element | null {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const treatedValue = typeof value === "string" ? [value] : value;
 
   const refButton = useRef<HTMLButtonElement>(null);
 
-  const PopoverContentDropdown = editNode
-    ? PopoverContent
-    : PopoverContentWithoutPortal;
+  const PopoverContentDropdown =
+    editNode || inspectionPanel ? PopoverContent : PopoverContentWithoutPortal;
 
   const [customValues, setCustomValues] = useState<string[]>([]);
   const [searchValue, setSearchValue] = useState("");
@@ -70,11 +73,7 @@ export default function MultiselectComponent({
 
   useEffect(() => {
     searchRoleByTerm(searchValue);
-  }, [onlySelected]);
-
-  useEffect(() => {
-    searchRoleByTerm(searchValue);
-  }, [options]);
+  }, [searchValue, onlySelected, options]);
 
   useEffect(() => {
     setCustomValues(
@@ -102,6 +101,9 @@ export default function MultiselectComponent({
     } else {
       handleOnNewValue({ value: [...treatedValue, currentValue] });
     }
+    if (hideOnSelection) {
+      setOpen(false);
+    }
   };
 
   const renderDropdownTrigger = () => (
@@ -125,7 +127,7 @@ export default function MultiselectComponent({
           {treatedValue.length > 0 &&
           options.find((option) => treatedValue.includes(option))
             ? treatedValue.join(", ")
-            : "Choose an option..."}
+            : t("multiselect.chooseOption")}
         </span>
         <ForwardedIconComponent
           name="ChevronsUpDown"
@@ -145,7 +147,7 @@ export default function MultiselectComponent({
         onChange={(event) => {
           setSearchValue(event.target.value);
         }}
-        placeholder="Search options..."
+        placeholder={t("input.searchOptions")}
         className="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
       />
       <Button
@@ -163,7 +165,7 @@ export default function MultiselectComponent({
 
   const renderOptionsList = () => (
     <CommandList className="overflow-y-scroll">
-      <CommandEmpty>No values found.</CommandEmpty>
+      <CommandEmpty>{t("multiselect.noValuesFound")}</CommandEmpty>
       <CommandGroup>
         {filteredOptions.map((option, index) => (
           <ShadTooltip key={index} delayDuration={700} content={option}>
@@ -175,7 +177,9 @@ export default function MultiselectComponent({
                 data-testid={`${option}-${id ?? ""}-option`}
               >
                 {(customValues.includes(option) || searchValue === option) && (
-                  <span className="text-muted-foreground">Text:&nbsp;</span>
+                  <span className="text-muted-foreground">
+                    {t("multiselect.textPrefix")}&nbsp;
+                  </span>
                 )}
                 <span className="truncate">{option}</span>
                 <ForwardedIconComponent
@@ -193,6 +197,10 @@ export default function MultiselectComponent({
     </CommandList>
   );
 
+  if (!showParameter) {
+    return null;
+  }
+
   if (Object.keys(options).length === 0 && !combobox) {
     return (
       <div>
@@ -209,7 +217,7 @@ export default function MultiselectComponent({
       <PopoverContentDropdown
         onOpenAutoFocus={(event) => event.preventDefault()}
         side="bottom"
-        avoidCollisions={false}
+        avoidCollisions={inspectionPanel || editNode}
         className="noflow nowheel nopan nodelete nodrag p-0"
         style={{ minWidth: refButton?.current?.clientWidth ?? "200px" }}
       >

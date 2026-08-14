@@ -167,3 +167,33 @@ class AsyncBaseCacheService(Service, Generic[AsyncLockType]):
         Returns:
             True if the key is in the cache, False otherwise.
         """
+
+
+class ExternalAsyncBaseCacheService(AsyncBaseCacheService):
+    """Abstract base class for an external async cache.
+
+    Subclasses MUST implement ``teardown`` so the Gunicorn master preload
+    hook can close any OS-level connection resources (TCP sockets, file
+    descriptors, etc.) before fork. Leaving ``teardown`` unimplemented
+    would cause workers to share a single connection across processes,
+    leading to undefined protocol-level behavior.
+    """
+
+    name = "cache_service"
+
+    @abc.abstractmethod
+    async def is_connected(self) -> bool:
+        """Check if the cache is connected.
+
+        Returns:
+            True if the cache is connected, False otherwise.
+        """
+
+    @abc.abstractmethod
+    async def teardown(self) -> None:
+        """Release fork-unsafe OS resources held by this cache.
+
+        Called from the Gunicorn master preload hook *before* workers are
+        forked. After this returns, subsequent cache operations in a
+        worker must transparently re-establish their own connections.
+        """

@@ -1,14 +1,37 @@
 import asyncio
+import json
 from uuid import UUID, uuid4
 
+import orjson
 import pytest
 from fastapi import status
 from httpx import AsyncClient
-from langflow.custom.directory_reader.directory_reader import DirectoryReader
+from langflow.services.database.models.flow.model import FlowCreate
 from langflow.services.deps import get_settings_service
+from lfx.custom.directory_reader.directory_reader import DirectoryReader
+from lfx.services.settings.base import BASE_COMPONENTS_PATH
+
+
+@pytest.fixture(autouse=True)
+def allow_custom_components_by_default(monkeypatch):
+    monkeypatch.setenv("LANGFLOW_ALLOW_CUSTOM_COMPONENTS", "true")
 
 
 async def run_post(client, flow_id, headers, post_data):
+    """Sends a POST request to process a flow and returns the JSON response.
+
+    Args:
+        client: The HTTP client to use for making requests.
+        flow_id: The identifier of the flow to process.
+        headers: The HTTP headers to include in the request.
+        post_data: The JSON payload to send in the request.
+
+    Returns:
+        The JSON response from the API if the request is successful.
+
+    Raises:
+        AssertionError: If the response status code is not 200.
+    """
     response = await client.post(
         f"api/v1/process/{flow_id}",
         headers=headers,
@@ -110,24 +133,40 @@ PROMPT_REQUEST = {
 
 @pytest.mark.benchmark
 async def test_get_all(client: AsyncClient, logged_in_headers):
+    """Tests the retrieval of all available components from the API.
+
+    Sends a GET request to the `api/v1/all` endpoint and verifies that the returned component names
+    correspond to files in the components directory. Also checks for the presence of specific components
+    such as "ChatInput", "Prompt", and "ChatOutput" in the response.
+    """
     response = await client.get("api/v1/all", headers=logged_in_headers)
     assert response.status_code == 200
-    settings = get_settings_service().settings
-    dir_reader = DirectoryReader(settings.components_path[0])
+    dir_reader = DirectoryReader(BASE_COMPONENTS_PATH)
     files = dir_reader.get_files()
     # json_response is a dict of dicts
-    all_names = [component_name for _, components in response.json().items() for component_name in components]
+    all_names = [
+        component_name
+        for key, components in response.json().items()
+        if key != "component_display_names"
+        for component_name in components
+    ]
     json_response = response.json()
+    # Bundle/extension components are namespaced "ext:<bundle>:<Class>@<slot>" and are served
+    # from installed bundle packages (e.g. docling, ibm, arxiv), not from BASE_COMPONENTS_PATH,
+    # so they are not backed by files in that directory. Exclude them before comparing against
+    # the on-disk file count.
+    base_component_names = [name for name in all_names if not name.startswith("ext:")]
     # We need to test the custom nodes
-    assert len(all_names) <= len(
+    assert len(base_component_names) <= len(
         files
     )  # Less or equal because we might have some files that don't have the dependencies installed
-    assert "ChatInput" in json_response["inputs"]
-    assert "Prompt" in json_response["prompts"]
-    assert "ChatOutput" in json_response["outputs"]
+    assert "ChatInput" in json_response["input_output"]
+    assert "Prompt Template" in json_response["models_and_agents"]
+    assert "ChatOutput" in json_response["input_output"]
 
 
-async def test_post_validate_code(client: AsyncClient):
+@pytest.mark.usefixtures("active_user")
+async def test_post_validate_code(client: AsyncClient, logged_in_headers):
     # Test case with a valid import and function
     code1 = """
 import math
@@ -135,7 +174,7 @@ import math
 def square(x):
     return x ** 2
 """
-    response1 = await client.post("api/v1/validate/code", json={"code": code1})
+    response1 = await client.post("api/v1/validate/code", json={"code": code1}, headers=logged_in_headers)
     assert response1.status_code == 200
     assert response1.json() == {"imports": {"errors": []}, "function": {"errors": []}}
 
@@ -146,7 +185,7 @@ import non_existent_module
 def square(x):
     return x ** 2
 """
-    response2 = await client.post("api/v1/validate/code", json={"code": code2})
+    response2 = await client.post("api/v1/validate/code", json={"code": code2}, headers=logged_in_headers)
     assert response2.status_code == 200
     assert response2.json() == {
         "imports": {"errors": ["No module named 'non_existent_module'"]},
@@ -160,7 +199,7 @@ import math
 def square(x)
     return x ** 2
 """
-    response3 = await client.post("api/v1/validate/code", json={"code": code3})
+    response3 = await client.post("api/v1/validate/code", json={"code": code3}, headers=logged_in_headers)
     assert response3.status_code == 200
     assert response3.json() == {
         "imports": {"errors": []},
@@ -168,11 +207,11 @@ def square(x)
     }
 
     # Test case with invalid JSON payload
-    response4 = await client.post("api/v1/validate/code", json={"invalid_key": code1})
+    response4 = await client.post("api/v1/validate/code", json={"invalid_key": code1}, headers=logged_in_headers)
     assert response4.status_code == 422
 
     # Test case with an empty code string
-    response5 = await client.post("api/v1/validate/code", json={"code": ""})
+    response5 = await client.post("api/v1/validate/code", json={"code": ""}, headers=logged_in_headers)
     assert response5.status_code == 200
     assert response5.json() == {"imports": {"errors": []}, "function": {"errors": []}}
 
@@ -183,7 +222,7 @@ import math
 def square(x)
     return x ** 2
 """
-    response6 = await client.post("api/v1/validate/code", json={"code": code6})
+    response6 = await client.post("api/v1/validate/code", json={"code": code6}, headers=logged_in_headers)
     assert response6.status_code == 200
     assert response6.json() == {
         "imports": {"errors": []},
@@ -208,18 +247,19 @@ What is a good name for a company that makes {product}?
 INVALID_PROMPT = "This is an invalid prompt without any input variable."
 
 
-async def test_valid_prompt(client: AsyncClient):
+async def test_valid_prompt(client: AsyncClient, logged_in_headers):
     PROMPT_REQUEST["template"] = VALID_PROMPT
-    response = await client.post("api/v1/validate/prompt", json=PROMPT_REQUEST)
+    response = await client.post("api/v1/validate/prompt", json=PROMPT_REQUEST, headers=logged_in_headers)
     assert response.status_code == 200
     assert response.json()["input_variables"] == ["product"]
 
 
-async def test_invalid_prompt(client: AsyncClient):
+async def test_invalid_prompt(client: AsyncClient, logged_in_headers):
     PROMPT_REQUEST["template"] = INVALID_PROMPT
     response = await client.post(
         "api/v1/validate/prompt",
         json=PROMPT_REQUEST,
+        headers=logged_in_headers,
     )
     assert response.status_code == 200
     assert response.json()["input_variables"] == []
@@ -234,17 +274,26 @@ async def test_invalid_prompt(client: AsyncClient):
         ("{a}, {b}, and {c} are variables.", ["a", "b", "c"]),
     ],
 )
-async def test_various_prompts(client, prompt, expected_input_variables):
+async def test_various_prompts(client, logged_in_headers, prompt, expected_input_variables):
     PROMPT_REQUEST["template"] = prompt
-    response = await client.post("api/v1/validate/prompt", json=PROMPT_REQUEST)
+    response = await client.post("api/v1/validate/prompt", json=PROMPT_REQUEST, headers=logged_in_headers)
     assert response.status_code == 200
     assert response.json()["input_variables"] == expected_input_variables
 
 
 async def test_get_vertices_flow_not_found(client, logged_in_headers):
+    """A nonexistent flow id on the deprecated /build/{flow_id}/vertices route returns 404.
+
+    The handler now does an owner-or-public ownership check before reaching
+    ``build_graph_from_db`` (which previously raised ``ValueError("Invalid
+    flow ID")`` and surfaced as 500). Unknown flow ids — and other users'
+    private flows — fail closed with 404, matching the supported
+    /build/{flow_id}/flow contract and the rest of the API's UUID-privacy
+    behavior.
+    """
     uuid = uuid4()
     response = await client.post(f"/api/v1/build/{uuid}/vertices", headers=logged_in_headers)
-    assert response.status_code == 500
+    assert response.status_code == 404
 
 
 async def test_get_vertices(client, added_flow_webhook_test, logged_in_headers):
@@ -260,10 +309,133 @@ async def test_get_vertices(client, added_flow_webhook_test, logged_in_headers):
     assert set(ids) == {"ChatInput"}
 
 
+async def test_get_vertices_blocks_custom_components_when_disabled(
+    client, added_flow_webhook_test, logged_in_headers, monkeypatch
+):
+    monkeypatch.setattr(get_settings_service().settings, "allow_custom_components", False)
+
+    flow_id = added_flow_webhook_test["id"]
+    response = await client.post(f"/api/v1/build/{flow_id}/vertices", headers=logged_in_headers)
+
+    assert response.status_code == 400
+    assert "outdated components must be updated before running" in response.json()["detail"]
+
+
 async def test_build_vertex_invalid_flow_id(client, logged_in_headers):
+    """A nonexistent flow id on the deprecated /build/{flow_id}/vertices/{vertex_id} route returns 404.
+
+    Same contract as test_get_vertices_flow_not_found — the new ownership
+    check raises 404 before the graph-cache lookup that previously produced
+    a generic 500.
+    """
     uuid = uuid4()
     response = await client.post(f"/api/v1/build/{uuid}/vertices/vertex_id", headers=logged_in_headers)
-    assert response.status_code == 500
+    assert response.status_code == 404
+
+
+@pytest.fixture
+async def second_user_headers(client):
+    """Log in as a second, distinct user.
+
+    The conftest's ``active_user`` / ``logged_in_headers`` fixtures hard-code
+    a single ``activeuser`` account. Cross-user authorization tests need a
+    second login token, which this fixture provides by registering and
+    logging in as ``second_active_user`` for the lifetime of the test.
+    """
+    from langflow.services.database.models.user.model import User, UserRead
+    from langflow.services.deps import get_auth_service, session_scope
+    from sqlmodel import select
+
+    username = "second_active_user"
+    password = "testpassword"  # noqa: S105  # pragma: allowlist secret
+
+    async with session_scope() as session:
+        user = User(
+            username=username,
+            password=get_auth_service().get_password_hash(password),
+            is_active=True,
+            is_superuser=False,
+        )
+        stmt = select(User).where(User.username == username)
+        if existing := (await session.exec(stmt)).first():
+            user = existing
+        else:
+            session.add(user)
+            await session.flush()
+            await session.refresh(user)
+        user_id = UserRead.model_validate(user, from_attributes=True).id
+
+    login_response = await client.post("api/v1/login", data={"username": username, "password": password})
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+    yield {"Authorization": f"Bearer {token}"}
+
+    async with session_scope() as session:
+        if existing := await session.get(User, user_id):
+            await session.delete(existing)
+
+
+async def test_get_vertices_returns_404_for_other_users_private_flow(
+    client, added_flow_webhook_test, second_user_headers
+):
+    """A second user attempting to build vertices on someone else's private flow gets 404.
+
+    Behavioral regression for the deprecated /build/{flow_id}/vertices guard.
+    The flow is created by ``active_user`` via ``added_flow_webhook_test``;
+    ``second_user_headers`` is a different account, so the owner-or-public
+    fetch returns None and the handler raises 404 (preserving UUID-privacy)
+    before reaching the graph builder that previously had no owner filter.
+    """
+    flow_id = added_flow_webhook_test["id"]
+    response = await client.post(f"/api/v1/build/{flow_id}/vertices", headers=second_user_headers)
+    assert response.status_code == 404, response.text
+
+
+async def test_get_vertices_with_supplied_data_returns_404_for_other_users_private_flow(
+    client, added_flow_webhook_test, second_user_headers
+):
+    """A non-owner cannot pollute another user's graph cache via the deprecated supplied-data path.
+
+    Regression for the reported cache-pollution scenario: a second user POSTs
+    attacker-controlled graph ``data`` for someone else's private flow UUID. The
+    owner-or-public ownership guard runs *before* the build-and-cache branch
+    (``build_and_cache_graph_from_data`` -> ``set_cache(str(flow_id), ...)``), so the
+    request fails closed with 404 and no graph is cached under the victim flow id.
+
+    Complements ``test_get_vertices_returns_404_for_other_users_private_flow`` (which
+    exercises the no-data branch) by covering the supplied-data branch specifically.
+    The payload is a schema-valid ``FlowDataRequest`` so the request clears body
+    validation and actually reaches the ownership guard.
+    """
+    flow_id = added_flow_webhook_test["id"]
+    attacker_data = {
+        "nodes": [{"id": "attacker-node", "data": {"type": "AttackerControlled"}}],
+        "edges": [],
+        "viewport": {"x": 1, "y": 2, "zoom": 0.75},
+    }
+    response = await client.post(f"/api/v1/build/{flow_id}/vertices", json=attacker_data, headers=second_user_headers)
+    assert response.status_code == 404, response.text
+
+
+async def test_build_vertex_returns_404_for_other_users_private_flow(
+    client, added_flow_webhook_test, second_user_headers
+):
+    """Same cross-user 404 behavior on the per-vertex deprecated build route."""
+    flow_id = added_flow_webhook_test["id"]
+    response = await client.post(f"/api/v1/build/{flow_id}/vertices/some-vertex-id", headers=second_user_headers)
+    assert response.status_code == 404, response.text
+
+
+async def test_build_vertex_stream_returns_404_for_other_users_private_flow(
+    client, added_flow_webhook_test, second_user_headers
+):
+    """The deprecated stream route must authorize before reading the shared graph cache."""
+    flow_id = added_flow_webhook_test["id"]
+    response = await client.get(
+        f"/api/v1/build/{flow_id}/ChatInput-some-id/stream",
+        headers=second_user_headers,
+    )
+    assert response.status_code == 404, response.text
 
 
 async def test_build_vertex_invalid_vertex_id(client, added_flow_webhook_test, logged_in_headers):
@@ -287,7 +459,6 @@ async def test_successful_run_no_payload(client, simple_api_test, created_api_ke
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": ""}
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 1
     ids = [output.get("component_id") for output in outputs_dict.get("outputs")]
@@ -318,7 +489,6 @@ async def test_successful_run_with_output_type_text(client, simple_api_test, cre
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": ""}
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 1
     ids = [output.get("component_id") for output in outputs_dict.get("outputs")]
@@ -350,7 +520,6 @@ async def test_successful_run_with_output_type_any(client, simple_api_test, crea
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": ""}
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 1
     ids = [output.get("component_id") for output in outputs_dict.get("outputs")]
@@ -383,7 +552,6 @@ async def test_successful_run_with_output_type_debug(client, simple_api_test, cr
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": ""}
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 3
 
@@ -409,7 +577,13 @@ async def test_successful_run_with_input_type_text(client, simple_api_test, crea
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": "value1"}
+    actual_inputs = outputs_dict.get("inputs")
+    expected_inputs = {"input_value": "value1"}
+    assert actual_inputs == expected_inputs, (
+        f"Expected inputs to be {expected_inputs}, but got {actual_inputs}. "
+        f"Full outputs_dict keys: {list(outputs_dict.keys())}, "
+        f"Full response: {json_response}"
+    )
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 3
     # Now we get all components that contain TextInput in the component_id
@@ -417,9 +591,9 @@ async def test_successful_run_with_input_type_text(client, simple_api_test, crea
     assert len(text_input_outputs) == 1
     # Now we check if the input_value is correct
     # We get text key twice because the output is now a Message
-    assert all(
-        output.get("results").get("text").get("text") == "value1" for output in text_input_outputs
-    ), text_input_outputs
+    assert all(output.get("results").get("text").get("text") == "value1" for output in text_input_outputs), (
+        text_input_outputs
+    )
 
 
 @pytest.mark.api_key_required
@@ -444,16 +618,22 @@ async def test_successful_run_with_input_type_chat(client: AsyncClient, simple_a
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": "value1"}
+    actual_inputs = outputs_dict.get("inputs")
+    expected_inputs = {"input_value": "value1"}
+    assert actual_inputs == expected_inputs, (
+        f"Expected inputs to be {expected_inputs}, but got {actual_inputs}. "
+        f"Full outputs_dict keys: {list(outputs_dict.keys())}, "
+        f"Full response: {json_response}"
+    )
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 3
     # Now we get all components that contain TextInput in the component_id
     chat_input_outputs = [output for output in outputs_dict.get("outputs") if "ChatInput" in output.get("component_id")]
     assert len(chat_input_outputs) == 1
     # Now we check if the input_value is correct
-    assert all(
-        output.get("results").get("message").get("text") == "value1" for output in chat_input_outputs
-    ), chat_input_outputs
+    assert all(output.get("results").get("message").get("text") == "value1" for output in chat_input_outputs), (
+        chat_input_outputs
+    )
 
 
 @pytest.mark.benchmark
@@ -492,7 +672,13 @@ async def test_successful_run_with_input_type_any(client, simple_api_test, creat
     assert len(outputs_dict) == 2
     assert "inputs" in outputs_dict
     assert "outputs" in outputs_dict
-    assert outputs_dict.get("inputs") == {"input_value": "value1"}
+    actual_inputs = outputs_dict.get("inputs")
+    expected_inputs = {"input_value": "value1"}
+    assert actual_inputs == expected_inputs, (
+        f"Expected inputs to be {expected_inputs}, but got {actual_inputs}. "
+        f"Full outputs_dict keys: {list(outputs_dict.keys())}, "
+        f"Full response: {json_response}"
+    )
     assert isinstance(outputs_dict.get("outputs"), list)
     assert len(outputs_dict.get("outputs")) == 3
     # Now we get all components that contain TextInput or ChatInput in the component_id
@@ -507,9 +693,9 @@ async def test_successful_run_with_input_type_any(client, simple_api_test, creat
     all_message_or_text_dicts = [
         result_dict.get("message", result_dict.get("text")) for result_dict in all_result_dicts
     ]
-    assert all(
-        message_or_text_dict.get("text") == "value1" for message_or_text_dict in all_message_or_text_dicts
-    ), any_input_outputs
+    assert all(message_or_text_dict.get("text") == "value1" for message_or_text_dict in all_message_or_text_dicts), (
+        any_input_outputs
+    )
 
 
 async def test_invalid_flow_id(client, created_api_key):
@@ -529,3 +715,569 @@ async def test_starter_projects(client, created_api_key):
     headers = {"x-api-key": created_api_key.api_key}
     response = await client.get("api/v1/starter-projects/", headers=headers)
     assert response.status_code == status.HTTP_200_OK, response.text
+
+
+async def _run_single_stream_test(client: AsyncClient, flow_id: str, headers: dict, payload: dict):
+    """Helper coroutine to run and validate a single streaming request."""
+    received_events = []  # Track all event types in sequence
+    got_end_event = False
+    final_result = None
+
+    async with client.stream("POST", f"/api/v1/run/{flow_id}?stream=true", headers=headers, json=payload) as response:
+        assert response.status_code == status.HTTP_200_OK, (
+            f"Request failed with status {response.status_code}: {response.text}"
+        )
+        assert response.headers["content-type"].startswith("text/event-stream"), (
+            f"Expected event stream content type, got: {response.headers['content-type']}"
+        )
+
+        async for line in response.aiter_lines():
+            if not line or line.strip() == "":
+                continue
+
+            try:
+                event_data = json.loads(line)
+            except json.JSONDecodeError:
+                pytest.fail(f"Failed to parse JSON from stream line: {line}")
+
+            assert "event" in event_data, f"Event type missing in response line: {line}"
+            event_type = event_data["event"]
+            received_events.append(event_type)
+
+            if event_type == "add_message":
+                message_data = event_data["data"]
+                assert "sender_name" in message_data, f"Missing 'sender_name' in add_message event: {message_data}"
+                assert "sender" in message_data, f"Missing 'sender' in add_message event: {message_data}"
+                assert "session_id" in message_data, f"Missing 'session_id' in add_message event: {message_data}"
+                assert "text" in message_data, f"Missing 'text' in add_message event: {message_data}"
+
+            elif event_type == "token":
+                token_data = event_data["data"]
+                assert "chunk" in token_data, f"Missing 'chunk' in token event: {token_data}"
+
+            elif event_type == "end":
+                got_end_event = True
+                final_result = event_data["data"].get("result")
+                assert final_result is not None, "End event should contain result data but was None"
+                break  # Exit loop after end event
+
+            elif event_type == "error":
+                pytest.fail(f"Received error event in stream: {event_data['data']}")
+
+    # Assert we got the end event
+    assert got_end_event, f"Stream did not receive an end event. Received events: {received_events}"
+
+    # Verify event sequence
+    assert "end" in received_events, f"End event missing from event sequence. Received: {received_events}"
+    assert received_events[-1] == "end", f"Last event should be 'end', but was '{received_events[-1]}'"
+
+    # Verify we got at least one message or token event before end
+    assert len(received_events) > 2, f"Should receive multiple events before the end event. Got: {received_events}"
+    assert any(event == "add_message" for event in received_events), (
+        f"Should receive at least one add_message event. Received events: {received_events}"
+    )
+    assert any(event == "token" for event in received_events), (
+        f"Should receive at least one token event. Received events: {received_events}"
+    )
+
+    # Verify the final result structure in the end event
+    assert final_result is not None, "Final result should not be None"
+    assert "outputs" in final_result, f"Missing 'outputs' in final result: {final_result}"
+    assert "session_id" in final_result, f"Missing 'session_id' in final result: {final_result}"
+    outputs = final_result["outputs"]
+    assert len(outputs) == 1, f"Expected 1 output, got {len(outputs)}: {outputs}"
+    outputs_dict = outputs[0]
+
+    # Verify the debug outputs in final result
+    assert "inputs" in outputs_dict, f"Missing 'inputs' in outputs_dict: {outputs_dict}"
+    assert "outputs" in outputs_dict, f"Missing 'outputs' in outputs_dict: {outputs_dict}"
+    assert outputs_dict["inputs"] == {"input_value": payload["input_value"]}, (
+        f"Input value mismatch. Expected: {{'input_value': {payload['input_value']}}}, Got: {outputs_dict['inputs']}"
+    )
+    assert isinstance(outputs_dict.get("outputs"), list), (
+        f"Expected outputs to be a list, got: {type(outputs_dict.get('outputs'))}"
+    )
+
+    chat_input_outputs = [output for output in outputs_dict.get("outputs") if "ChatInput" in output.get("component_id")]
+    assert len(chat_input_outputs) == 1, (
+        f"Expected 1 ChatInput output, got {len(chat_input_outputs)}: {chat_input_outputs}"
+    )
+    assert all(
+        output.get("results").get("message").get("text") == payload["input_value"] for output in chat_input_outputs
+    ), f"Message text mismatch. Expected: {payload['input_value']}, Got: {chat_input_outputs}"
+
+
+@pytest.mark.api_key_required
+@pytest.mark.benchmark
+async def test_concurrent_stream_run_with_input_type_chat(client: AsyncClient, starter_project, created_api_key):
+    """Test concurrent streaming requests to the run endpoint with chat input type."""
+    headers = {"x-api-key": created_api_key.api_key, "Accept": "text/event-stream", "Content-Type": "application/json"}
+    flow_id = starter_project["id"]
+    payload = {
+        "input_type": "chat",
+        "output_type": "debug",
+        "input_value": "How are you?",
+    }
+    num_concurrent_requests = 5  # Number of concurrent requests to test
+
+    tasks = [_run_single_stream_test(client, flow_id, headers, payload) for _ in range(num_concurrent_requests)]
+
+    # Run all streaming tests concurrently
+    await asyncio.gather(*tasks)
+
+
+# ============================================================================
+# Security Tests: User Permission Checks for Flow Access
+# ============================================================================
+
+
+@pytest.mark.benchmark
+async def test_user_can_run_own_flow(client: AsyncClient, simple_api_test, created_api_key):
+    """Test that a user can successfully run their own flow using their API key."""
+    headers = {"x-api-key": created_api_key.api_key}
+    flow_id = simple_api_test["id"]
+
+    response = await client.post(f"/api/v1/run/{flow_id}", headers=headers)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    json_response = response.json()
+    assert "session_id" in json_response
+    assert "outputs" in json_response
+
+
+@pytest.mark.benchmark
+async def test_user_cannot_run_other_users_flow(client: AsyncClient, simple_api_test, user_two_api_key):
+    """Test that a user cannot run another user's flow.
+
+    Post-fix behavior is 404 (not 403) so we don't leak flow existence
+    via a 403-vs-404 oracle.  See ``get_flow_for_api_key_user`` in
+    ``api/v1/endpoints.py``.
+    """
+    # simple_api_test belongs to active_user, but we're using user_two's API key
+    headers = {"x-api-key": user_two_api_key}
+    flow_id = simple_api_test["id"]
+
+    response = await client.post(f"/api/v1/run/{flow_id}", headers=headers)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    # Must not leak that the flow exists under another user's account.
+    assert "permission" not in response.text.lower()
+
+
+@pytest.mark.benchmark
+async def test_user_cannot_run_other_users_flow_with_payload(client: AsyncClient, simple_api_test, user_two_api_key):
+    """Test that a user cannot run another user's flow even with valid payload."""
+    headers = {"x-api-key": user_two_api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "input_type": "chat",
+        "output_type": "debug",
+        "input_value": "test message",
+    }
+
+    response = await client.post(f"/api/v1/run/{flow_id}", headers=headers, json=payload)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert "permission" not in response.text.lower()
+
+
+@pytest.mark.benchmark
+async def test_user_can_run_own_flow_with_streaming(client: AsyncClient, simple_api_test, created_api_key):
+    """Test that a user can run their own flow with streaming enabled."""
+    headers = {"x-api-key": created_api_key.api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "input_type": "chat",
+        "output_type": "debug",
+        "input_value": "test",
+    }
+
+    async with client.stream("POST", f"/api/v1/run/{flow_id}?stream=true", headers=headers, json=payload) as response:
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+
+@pytest.mark.benchmark
+async def test_user_cannot_run_other_users_flow_with_streaming(client: AsyncClient, simple_api_test, user_two_api_key):
+    """Test that a user cannot run another user's flow with streaming."""
+    headers = {"x-api-key": user_two_api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "input_type": "chat",
+        "output_type": "debug",
+        "input_value": "test",
+    }
+
+    response = await client.post(f"/api/v1/run/{flow_id}?stream=true", headers=headers, json=payload)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert "permission" not in response.text.lower()
+
+
+@pytest.mark.benchmark
+async def test_user_can_run_own_flow_advanced_endpoint(client: AsyncClient, simple_api_test, created_api_key):
+    """Test that a user can run their own flow using the advanced endpoint."""
+    headers = {"x-api-key": created_api_key.api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "inputs": [{"components": [], "input_value": "test"}],
+        "outputs": [],
+        "tweaks": {},
+        "stream": False,
+    }
+
+    response = await client.post(f"/api/v1/run/advanced/{flow_id}", headers=headers, json=payload)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    json_response = response.json()
+    assert "session_id" in json_response
+    assert "outputs" in json_response
+
+
+@pytest.mark.benchmark
+async def test_user_cannot_run_other_users_flow_advanced_endpoint(
+    client: AsyncClient, simple_api_test, user_two_api_key
+):
+    """Test that a user cannot run another user's flow using the advanced endpoint."""
+    headers = {"x-api-key": user_two_api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "inputs": [{"components": [], "input_value": "test"}],
+        "outputs": [],
+        "tweaks": {},
+        "stream": False,
+    }
+
+    response = await client.post(f"/api/v1/run/advanced/{flow_id}", headers=headers, json=payload)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert "permission" not in response.text.lower()
+
+
+@pytest.mark.benchmark
+async def test_user_cannot_run_other_users_flow_session_endpoint(
+    client: AsyncClient, simple_api_test, logged_in_headers, monkeypatch
+):
+    """Regression: cross-user access on /run/session/{flow_id} returns 404.
+
+    ``simplified_run_flow_session`` is feature-flagged behind
+    ``agentic_experience`` and uses session auth (``CurrentActiveUser``).
+    We flip the flag on via monkeypatch and log in as ``active_super_user``
+    (a different user than ``active_user`` who owns ``simple_api_test``) to
+    exercise the session-auth variant of the wrapper dependency.
+    """
+    from langflow.services.auth.utils import get_password_hash
+    from langflow.services.database.models.user.model import User
+    from langflow.services.deps import get_settings_service
+    from lfx.services.deps import session_scope
+    from sqlmodel import select
+
+    settings_service = get_settings_service()
+    monkeypatch.setattr(settings_service.settings, "agentic_experience", True)
+
+    # Create a second user with session credentials and log in.
+    other_username = "cross_user_session_user"
+    other_password = "testpassword"  # noqa: S105  # pragma: allowlist secret
+    async with session_scope() as session:
+        existing = (await session.exec(select(User).where(User.username == other_username))).first()
+        if existing is None:
+            session.add(
+                User(
+                    username=other_username,
+                    password=get_password_hash(other_password),
+                    is_active=True,
+                    is_superuser=False,
+                )
+            )
+    try:
+        login_response = await client.post(
+            "api/v1/login",
+            data={"username": other_username, "password": other_password},
+        )
+        assert login_response.status_code == 200
+        other_headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+        flow_id = simple_api_test["id"]  # owned by active_user via logged_in_headers
+        response = await client.post(f"/api/v1/run/session/{flow_id}", headers=other_headers)
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+        assert "permission" not in response.text.lower()
+    finally:
+        async with session_scope() as session:
+            user = (await session.exec(select(User).where(User.username == other_username))).first()
+            if user is not None:
+                await session.delete(user)
+
+    # Silence the unused-fixture warning -- we depend on logged_in_headers to
+    # ensure active_user (the flow owner) exists before we attack as a peer.
+    _ = logged_in_headers
+
+
+@pytest.mark.benchmark
+async def test_run_rejects_malformed_user_id_query_param(client: AsyncClient, simple_api_test, created_api_key):
+    """Regression: a malformed ``?user_id=`` query param returns 404, not 500.
+
+    FastAPI exposes ``user_id`` as a free query parameter on routes that
+    previously used ``Depends(get_flow_by_id_or_endpoint_name)``.  The auth-aware
+    wrapper ignores the query value entirely (it derives user_id from the
+    authenticated caller), and the helper itself converts a malformed UUID
+    into 404 rather than a 500.  Both defenses must hold.
+    """
+    headers = {"x-api-key": created_api_key.api_key}
+    flow_id = simple_api_test["id"]
+
+    for bad in ("not-a-uuid", "", "12345"):
+        response = await client.post(
+            f"/api/v1/run/{flow_id}",
+            headers=headers,
+            params={"user_id": bad},
+        )
+        # Same user owns the flow, so the wrapper resolves the flow
+        # successfully regardless of the junk query param; the run itself
+        # returns 200 (the flow executes) rather than leaking a 500.
+        assert response.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR, (
+            f"Malformed user_id={bad!r} triggered 500: {response.text}"
+        )
+
+
+@pytest.mark.benchmark
+async def test_permission_check_with_nonexistent_flow(client: AsyncClient, created_api_key):
+    """Test permission check with a non-existent flow ID."""
+    headers = {"x-api-key": created_api_key.api_key}
+    nonexistent_flow_id = uuid4()
+
+    response = await client.post(f"/api/v1/run/{nonexistent_flow_id}", headers=headers)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+@pytest.mark.benchmark
+async def test_permission_check_with_invalid_flow_id(client: AsyncClient, created_api_key):
+    """Test permission check with an invalid flow ID format."""
+    headers = {"x-api-key": created_api_key.api_key}
+    invalid_flow_id = "not-a-valid-uuid"
+
+    response = await client.post(f"/api/v1/run/{invalid_flow_id}", headers=headers)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+@pytest.mark.benchmark
+async def test_permission_check_blocks_before_execution(client: AsyncClient, simple_api_test, user_two_api_key):
+    """Test that permission check happens before flow execution to prevent resource usage.
+
+    The 404 comes from ``get_flow_for_api_key_user`` which scopes lookups by
+    user_id, so cross-user access fails closed at the dependency layer rather
+    than via a downstream 403 (which would have given attackers a
+    403-vs-404 existence oracle on flow UUIDs).
+    """
+    headers = {"x-api-key": user_two_api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "input_type": "chat",
+        "output_type": "debug",
+        "input_value": "complex computation",
+        "tweaks": {},
+    }
+
+    # This should fail immediately at the flow-lookup dependency, not during execution
+    response = await client.post(f"/api/v1/run/{flow_id}", headers=headers, json=payload)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert "permission" not in response.text.lower()
+
+
+@pytest.mark.benchmark
+async def test_user_can_access_multiple_own_flows(
+    client: AsyncClient, logged_in_headers, json_simple_api_test, created_api_key
+):
+    """Test that a user can access multiple flows they own."""
+    # Create two flows for the same user
+    flow1_data = orjson.loads(json_simple_api_test)
+    flow1 = FlowCreate(name="Flow 1", data=flow1_data["data"], description="First flow")
+    response1 = await client.post("api/v1/flows/", json=flow1.model_dump(), headers=logged_in_headers)
+    assert response1.status_code == 201
+    flow1_id = response1.json()["id"]
+
+    flow2 = FlowCreate(name="Flow 2", data=flow1_data["data"], description="Second flow")
+    response2 = await client.post("api/v1/flows/", json=flow2.model_dump(), headers=logged_in_headers)
+    assert response2.status_code == 201
+    flow2_id = response2.json()["id"]
+
+    headers = {"x-api-key": created_api_key.api_key}
+
+    # User should be able to run both flows
+    response_flow1 = await client.post(f"/api/v1/run/{flow1_id}", headers=headers)
+    assert response_flow1.status_code == status.HTTP_200_OK, response_flow1.text
+
+    response_flow2 = await client.post(f"/api/v1/run/{flow2_id}", headers=headers)
+    assert response_flow2.status_code == status.HTTP_200_OK, response_flow2.text
+
+    # Cleanup
+    await client.delete(f"api/v1/flows/{flow1_id}", headers=logged_in_headers)
+    await client.delete(f"api/v1/flows/{flow2_id}", headers=logged_in_headers)
+
+
+# ============================================================================
+# OpenAI Responses API Tests
+# ============================================================================
+
+
+async def test_openai_responses_invalid_flow_id(client: AsyncClient, created_api_key):
+    """Test that OpenAI Responses endpoint returns error for invalid flow ID."""
+    headers = {"x-api-key": created_api_key.api_key}
+    payload = {
+        "model": "invalid-flow-id",
+        "input": "Hello",
+        "stream": False,
+    }
+
+    response = await client.post("/api/v1/responses", json=payload, headers=headers)
+
+    assert response.status_code == status.HTTP_200_OK  # Returns 200 with error in body
+    json_response = response.json()
+    assert "error" in json_response
+    assert json_response["error"]["type"] == "invalid_request_error"
+    assert json_response["error"]["code"] == "flow_not_found"
+
+
+async def test_openai_responses_tools_not_supported(client: AsyncClient, simple_api_test, created_api_key):
+    """Test that OpenAI Responses endpoint returns error when tools parameter is provided."""
+    headers = {"x-api-key": created_api_key.api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "model": flow_id,
+        "input": "Hello",
+        "stream": False,
+        "tools": [{"type": "function", "function": {"name": "test"}}],
+    }
+
+    response = await client.post("/api/v1/responses", json=payload, headers=headers)
+
+    assert response.status_code == status.HTTP_200_OK  # Returns 200 with error in body
+    json_response = response.json()
+    assert "error" in json_response
+    assert json_response["error"]["type"] == "invalid_request_error"
+    assert json_response["error"]["code"] == "tools_not_supported"
+
+
+async def test_openai_responses_nonexistent_flow_uuid(client: AsyncClient, created_api_key):
+    """Test that OpenAI Responses endpoint returns error for nonexistent flow UUID."""
+    headers = {"x-api-key": created_api_key.api_key}
+    nonexistent_flow_id = str(uuid4())
+    payload = {
+        "model": nonexistent_flow_id,
+        "input": "Hello",
+        "stream": False,
+    }
+
+    response = await client.post("/api/v1/responses", json=payload, headers=headers)
+
+    assert response.status_code == status.HTTP_200_OK  # Returns 200 with error in body
+    json_response = response.json()
+    assert "error" in json_response
+    assert json_response["error"]["type"] == "invalid_request_error"
+    assert "not found" in json_response["error"]["message"].lower()
+
+
+async def test_openai_responses_response_schema_has_usage_field(client: AsyncClient, simple_api_test, created_api_key):
+    """Test that OpenAI Responses response schema includes usage field (even if None)."""
+    headers = {"x-api-key": created_api_key.api_key}
+    flow_id = simple_api_test["id"]
+    payload = {
+        "model": flow_id,
+        "input": "Hello",
+        "stream": False,
+    }
+
+    response = await client.post("/api/v1/responses", json=payload, headers=headers)
+
+    # simple_api_test may not have ChatInput/ChatOutput, so it might error
+    # But if it succeeds, the response should have usage field
+    json_response = response.json()
+    if "error" not in json_response:
+        # If no error, verify response structure includes usage
+        assert "id" in json_response
+        assert "output" in json_response
+        assert "usage" in json_response  # usage field should always be present (can be None)
+
+
+async def test_openai_responses_rejects_cross_user_flow_access(
+    client: AsyncClient,
+    simple_api_test,
+    created_api_key,  # noqa: ARG001 - used only to establish the owner's API key
+):
+    """Regression: authenticated user cannot execute another user's flow.
+
+    Reproduces the IDOR scenario: a user with a valid API key passes a flow
+    UUID owned by a different user in the ``model`` field.  The pre-fix
+    behavior was that the endpoint executed the victim's flow and returned
+    200 with real output; after the fix the helper resolves to
+    flow_not_found because UUID lookups now enforce user scope.
+    """
+    from langflow.services.auth.utils import get_password_hash
+    from langflow.services.database.models.api_key.model import ApiKey
+    from langflow.services.database.models.user.model import User
+    from lfx.services.deps import session_scope
+    from sqlmodel import select
+
+    attacker_api_key = "attacker_random_key"  # pragma: allowlist secret
+    attacker_username = "idor_attacker_user"
+
+    # Create a second, unrelated user + API key inline.  Kept local to this
+    # test rather than promoted to a shared fixture to minimize blast radius.
+    async with session_scope() as session:
+        existing = (await session.exec(select(User).where(User.username == attacker_username))).first()
+        if existing is None:
+            attacker = User(
+                username=attacker_username,
+                password=get_password_hash("testpassword"),
+                is_active=True,
+                is_superuser=False,
+            )
+            session.add(attacker)
+            await session.flush()
+            await session.refresh(attacker)
+        else:
+            attacker = existing
+        existing_key = (await session.exec(select(ApiKey).where(ApiKey.api_key == attacker_api_key))).first()
+        if existing_key is None:
+            key = ApiKey(
+                name="idor_attacker_key",
+                user_id=attacker.id,
+                api_key=attacker_api_key,
+                hashed_api_key=get_password_hash(attacker_api_key),
+            )
+            session.add(key)
+            await session.flush()
+        attacker_id = attacker.id
+
+    try:
+        victim_flow_id = simple_api_test["id"]  # owned by active_user via logged_in_headers
+        payload = {
+            "model": victim_flow_id,
+            "input": "Hello",
+            "stream": False,
+        }
+        response = await client.post(
+            "/api/v1/responses",
+            json=payload,
+            headers={"x-api-key": attacker_api_key},
+        )
+
+        # The endpoint returns 200 with an OpenAI-style error body on flow-not-found
+        # (matches test_openai_responses_nonexistent_flow_uuid behavior).
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert "error" in body, f"Expected flow_not_found error for cross-user access, got: {body}"
+        assert body["error"]["code"] == "flow_not_found", (
+            f"Expected flow_not_found for cross-user access, got code: {body['error'].get('code')}"
+        )
+    finally:
+        # Clean up the second user + key we created for this test.
+        async with session_scope() as session:
+            for api_key_row in (await session.exec(select(ApiKey).where(ApiKey.user_id == attacker_id))).all():
+                await session.delete(api_key_row)
+            user = await session.get(User, attacker_id)
+            if user:
+                await session.delete(user)

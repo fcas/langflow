@@ -1,10 +1,11 @@
 import abc
 from uuid import UUID
 
+from pydantic import SecretStr
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from langflow.services.base import Service
-from langflow.services.database.models.variable.model import Variable, VariableRead
+from langflow.services.database.models.variable.model import Variable, VariableRead, VariableUpdate
 
 
 class VariableService(Service):
@@ -22,7 +23,7 @@ class VariableService(Service):
         """
 
     @abc.abstractmethod
-    async def get_variable(self, user_id: UUID | str, name: str, field: str, session: AsyncSession) -> str:
+    async def get_variable(self, user_id: UUID | str, name: str, field: str, session: AsyncSession) -> str | SecretStr:
         """Async get a variable value.
 
         Args:
@@ -116,4 +117,46 @@ class VariableService(Service):
         Args:
             user_id: The user ID.
             session: The database session.
+        """
+
+    @abc.abstractmethod
+    async def get_variable_by_id(self, user_id: UUID | str, variable_id: UUID | str, session: AsyncSession) -> Variable:
+        """Get a variable by ID.
+
+        Args:
+            user_id: The user ID.
+            variable_id: The ID of the variable.
+            session: The database session.
+
+        Returns:
+            The variable.
+        """
+
+    @abc.abstractmethod
+    async def get_variable_object(self, user_id: UUID | str, name: str, session: AsyncSession) -> Variable:
+        """Get a variable object by name.
+
+        Args:
+            user_id: The user ID.
+            name: The name of the variable.
+            session: The database session.
+
+        Returns:
+            The variable object.
+        """
+
+    @abc.abstractmethod
+    async def update_variable_fields(
+        self, user_id: UUID | str, variable_id: UUID | str, variable: VariableUpdate, session: AsyncSession
+    ) -> Variable:
+        """Update specific fields of a variable.
+
+        Args:
+            user_id: The user ID.
+            variable_id: The ID of the variable.
+            variable: The variable update model with fields to update.
+            session: The database session.
+
+        Returns:
+            The updated variable.
         """

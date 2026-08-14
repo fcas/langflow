@@ -1,4 +1,6 @@
-import { test } from "@playwright/test";
+import { test } from "../../fixtures";
+import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { openTemplatesModal } from "../../utils/flow/new-project-flow";
 
 test.describe(
   "Auto_login tests",
@@ -9,8 +11,10 @@ test.describe(
       "auto_login sign in",
       { tag: ["@release", "@api", "@database"] },
       async ({ page }) => {
-        await page.goto("/");
-        await page.getByText("New Flow", { exact: true }).click();
+        await awaitBootstrapTest(page, {
+          skipModal: true,
+        });
+        await openTemplatesModal(page);
       },
     );
 
@@ -18,28 +22,18 @@ test.describe(
       "auto_login block_admin",
       { tag: ["@release", "@api", "@database"] },
       async ({ page }) => {
-        await page.goto("/");
-        await page.getByText("New Flow", { exact: true }).click();
-        await page.waitForSelector('[data-testid="modal-title"]', {
-          timeout: 5000,
+        await awaitBootstrapTest(page, {
+          skipModal: true,
         });
+        await openTemplatesModal(page);
 
         await page.goto("/login");
-        await page.getByText("New Flow", { exact: true }).click();
-        await page.waitForSelector('[data-testid="modal-title"]', {
-          timeout: 5000,
-        });
+        await openTemplatesModal(page);
         await page.goto("/admin");
-        await page.getByText("New Flow", { exact: true }).click();
-        await page.waitForSelector('[data-testid="modal-title"]', {
-          timeout: 5000,
-        });
+        await openTemplatesModal(page);
 
         await page.goto("/admin/login");
-        await page.getByText("New Flow", { exact: true }).click();
-        await page.waitForSelector('[data-testid="modal-title"]', {
-          timeout: 5000,
-        });
+        await openTemplatesModal(page);
       },
     );
   },

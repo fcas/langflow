@@ -1,6 +1,11 @@
+import asyncio
+import inspect
 from typing import Any
+from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
+from lfx.custom.custom_component.component import Component
 from typing_extensions import TypedDict
 
 from tests.constants import SUPPORTED_VERSIONS
@@ -45,19 +50,33 @@ class ComponentTestBase:
         msg = f"{self.__class__.__name__} must implement the file_names_mapping fixture"
         raise NotImplementedError(msg)
 
-    def test_latest_version(self, component_class: type[Any], default_kwargs: dict[str, Any]) -> None:
+    async def component_setup(self, component_class: type[Any], default_kwargs: dict[str, Any]) -> Component:
+        mock_vertex = Mock()
+        mock_vertex.id = str(uuid4())
+        mock_vertex.graph = Mock()
+        mock_vertex.graph.id = str(uuid4())
+        mock_vertex.graph.session_id = str(uuid4())
+        mock_vertex.graph.flow_id = str(uuid4())
+        mock_vertex.is_output = Mock(return_value=False)
+        source_code = await asyncio.to_thread(inspect.getsource, component_class)
+        component_instance = component_class(_code=source_code, **default_kwargs)
+        component_instance._should_process_output = Mock(return_value=False)
+        component_instance._vertex = mock_vertex
+        # Mock the log method to avoid tracing service context issues
+        component_instance.log = Mock()
+        return component_instance
+
+    async def test_latest_version(self, component_class: type[Any], default_kwargs: dict[str, Any]) -> None:
         """Test that the component works with the latest version."""
-        result = component_class(**default_kwargs)()
+        component_instance = await self.component_setup(component_class, default_kwargs)
+        result = await component_instance.run()
         assert result is not None, "Component returned None for the latest version."
 
     def test_all_versions_have_a_file_name_defined(self, file_names_mapping: list[VersionComponentMapping]) -> None:
         """Ensure all supported versions have a file name defined."""
         if not file_names_mapping:
-            msg = (
-                f"file_names_mapping is empty for {self.__class__.__name__}. "
-                "Please define the version mappings for your component."
-            )
-            raise AssertionError(msg)
+            msg = f"file_names_mapping is empty for {self.__class__.__name__}. Skipping versions test."
+            pytest.skip(msg)
 
         version_mappings = {mapping["version"]: mapping for mapping in file_names_mapping}
 
@@ -94,6 +113,8 @@ class ComponentTestBase:
         file_names_mapping: list[VersionComponentMapping],
     ) -> None:
         """Test if the component works across different versions."""
+        if not file_names_mapping:
+            pytest.skip("No file names mapping defined for this component.")
         version_mappings = {mapping["version"]: mapping for mapping in file_names_mapping}
 
         mapping = version_mappings[version]

@@ -1,45 +1,52 @@
+import { useTranslation } from "react-i18next";
 import ForwardedIconComponent from "@/components/common/genericIconComponent";
 import ShadTooltip from "@/components/common/shadTooltipComponent";
-import IOModal from "@/modals/IOModal/new-modal";
+import { SimpleSidebarTrigger } from "@/components/ui/simple-sidebar";
+import { usePermissions } from "@/contexts/permissionsContext";
+import useFlowsManagerStore from "@/stores/flowsManagerStore";
 
-const PlaygroundButton = ({ hasIO, open, setOpen, canvasOpen }) => {
-  const PlayIcon = () => (
-    <ForwardedIconComponent name="Play" className="h-4 w-4 transition-all" />
-  );
+interface PlaygroundButtonProps {
+  hasIO: boolean;
+}
 
-  const ButtonLabel = () => <span className="hidden md:block">Playground</span>;
+const ButtonLabel = () => {
+  const { t } = useTranslation();
+  return <span className="font-normal text-mmd">{t("misc.playground")}</span>;
+};
 
-  const ActiveButton = () => (
-    <div
-      data-testid="playground-btn-flow-io"
-      className="playground-btn-flow-toolbar hover:bg-accent"
-    >
-      <PlayIcon />
-      <ButtonLabel />
-    </div>
-  );
+const DisabledButton = () => (
+  <div
+    className="relative inline-flex h-8 w-auto items-center justify-start gap-1.5 rounded px-2 text-sm font-normal cursor-not-allowed text-muted-foreground"
+    data-testid="playground-btn-flow"
+  >
+    <ForwardedIconComponent name="Play" className="h-4 w-4" />
+    <ButtonLabel />
+  </div>
+);
 
-  const DisabledButton = () => (
-    <div
-      className="playground-btn-flow-toolbar cursor-not-allowed text-muted-foreground duration-150"
-      data-testid="playground-btn-flow"
-    >
-      <PlayIcon />
-      <ButtonLabel />
-    </div>
-  );
+const PlaygroundButton = ({ hasIO }: PlaygroundButtonProps) => {
+  const { t } = useTranslation();
+  const { can } = usePermissions();
+  const currentFlowId = useFlowsManagerStore((state) => state.currentFlowId);
+  // Running a flow in the playground executes it → gate on the execute action.
+  const canRun = can(currentFlowId, "execute");
+
+  if (!canRun) {
+    return (
+      <ShadTooltip content={t("misc.playground")}>
+        <div>
+          <DisabledButton />
+        </div>
+      </ShadTooltip>
+    );
+  }
 
   return hasIO ? (
-    <IOModal
-      open={open}
-      setOpen={setOpen}
-      disable={!hasIO}
-      canvasOpen={canvasOpen}
-    >
-      <ActiveButton />
-    </IOModal>
+    <SimpleSidebarTrigger>
+      <ButtonLabel />
+    </SimpleSidebarTrigger>
   ) : (
-    <ShadTooltip content="Add a Chat Input or Chat Output to use the playground">
+    <ShadTooltip content={t("misc.addChatInputOutputPlayground")}>
       <div>
         <DisabledButton />
       </div>

@@ -9,31 +9,38 @@ import { ProtectedAdminRoute } from "./components/authorization/authAdminGuard";
 import { ProtectedRoute } from "./components/authorization/authGuard";
 import { ProtectedLoginRoute } from "./components/authorization/authLoginGuard";
 import { AuthSettingsGuard } from "./components/authorization/authSettingsGuard";
-import { StoreGuard } from "./components/authorization/storeGuard";
+import { PlaygroundAuthGate } from "./components/authorization/playgroundAuthGate";
 import ContextWrapper from "./contexts";
+import CustomDashboardWrapperPage from "./customization/components/custom-DashboardWrapperPage";
 import { CustomNavigate } from "./customization/components/custom-navigate";
 import { BASENAME } from "./customization/config-constants";
 import {
   ENABLE_CUSTOM_PARAM,
-  ENABLE_HOMEPAGE,
+  ENABLE_FILE_MANAGEMENT,
+  ENABLE_KNOWLEDGE_BASES,
 } from "./customization/feature-flags";
+import { CustomRoutesStore } from "./customization/utils/custom-routes-store";
+import { CustomRoutesStorePages } from "./customization/utils/custom-routes-store-pages";
 import { AppAuthenticatedPage } from "./pages/AppAuthenticatedPage";
 import { AppInitPage } from "./pages/AppInitPage";
 import { AppWrapperPage } from "./pages/AppWrapperPage";
-import { DashboardWrapperPage } from "./pages/DashboardWrapperPage";
 import FlowPage from "./pages/FlowPage";
 import LoginPage from "./pages/LoginPage";
-import MyCollectionComponent from "./pages/MainPage/oldComponents/myCollectionComponent";
-import OldHomePage from "./pages/MainPage/oldPages/mainPage";
-import CollectionPage from "./pages/MainPage/pages";
+import FilesPage from "./pages/MainPage/pages/filesPage";
 import HomePage from "./pages/MainPage/pages/homePage";
+import KnowledgePage from "./pages/MainPage/pages/knowledgePage";
+import SourceChunksPage from "./pages/MainPage/pages/knowledgePage/sourceChunksPage/SourceChunksPage";
+import CollectionPage from "./pages/MainPage/pages/main-page";
 import SettingsPage from "./pages/SettingsPage";
 import ApiKeysPage from "./pages/SettingsPage/pages/ApiKeysPage";
+import DBProvidersPage from "./pages/SettingsPage/pages/DBProvidersPage";
 import GeneralPage from "./pages/SettingsPage/pages/GeneralPage";
 import GlobalVariablesPage from "./pages/SettingsPage/pages/GlobalVariablesPage";
+import MCPServersPage from "./pages/SettingsPage/pages/MCPServersPage";
+import McpClientPage from "./pages/SettingsPage/pages/McpClientPage";
+import ModelProvidersPage from "./pages/SettingsPage/pages/ModelProvidersPage";
 import MessagesPage from "./pages/SettingsPage/pages/messagesPage";
 import ShortcutsPage from "./pages/SettingsPage/pages/ShortcutsPage";
-import StorePage from "./pages/StorePage";
 import ViewPage from "./pages/ViewPage";
 
 const AdminPage = lazy(() => import("./pages/AdminPage"));
@@ -43,12 +50,25 @@ const DeleteAccountPage = lazy(() => import("./pages/DeleteAccountPage"));
 const PlaygroundPage = lazy(() => import("./pages/Playground"));
 
 const SignUp = lazy(() => import("./pages/SignUpPage"));
+
 const router = createBrowserRouter(
   createRoutesFromElements([
+    <Route path="/playground/:id/">
+      <Route
+        path=""
+        element={
+          <ContextWrapper key={1}>
+            <PlaygroundAuthGate>
+              <PlaygroundPage />
+            </PlaygroundAuthGate>
+          </ContextWrapper>
+        }
+      />
+    </Route>,
     <Route
       path={ENABLE_CUSTOM_PARAM ? "/:customParam?" : "/"}
       element={
-        <ContextWrapper>
+        <ContextWrapper key={2}>
           <Outlet />
         </ContextWrapper>
       }
@@ -64,84 +84,62 @@ const router = createBrowserRouter(
             }
           >
             <Route path="" element={<AppAuthenticatedPage />}>
-              <Route path="" element={<DashboardWrapperPage />}>
-                <Route
-                  path=""
-                  element={
-                    ENABLE_HOMEPAGE ? <CollectionPage /> : <OldHomePage />
-                  }
-                >
+              <Route path="" element={<CustomDashboardWrapperPage />}>
+                <Route path="" element={<CollectionPage />}>
                   <Route
                     index
                     element={<CustomNavigate replace to={"flows"} />}
                   />
+                  {ENABLE_FILE_MANAGEMENT && (
+                    <Route path="assets">
+                      <Route
+                        index
+                        element={<CustomNavigate replace to="files" />}
+                      />
+                      <Route path="files" element={<FilesPage />} />
+                      {ENABLE_KNOWLEDGE_BASES && (
+                        <>
+                          <Route
+                            path="knowledge-bases"
+                            element={<KnowledgePage />}
+                          />
+                          <Route
+                            path="knowledge-bases/:sourceId/chunks"
+                            element={<SourceChunksPage />}
+                          />
+                        </>
+                      )}
+                    </Route>
+                  )}
                   <Route
                     path="flows/"
-                    element={
-                      ENABLE_HOMEPAGE ? (
-                        <HomePage key="flows" type="flows" />
-                      ) : (
-                        <MyCollectionComponent key="flows" type="flows" />
-                      )
-                    }
-                  >
-                    <Route
-                      path="folder/:folderId"
-                      element={
-                        ENABLE_HOMEPAGE ? (
-                          <HomePage key="flows" type="flows" />
-                        ) : (
-                          <MyCollectionComponent key="flows" type="flows" />
-                        )
-                      }
-                    />
-                  </Route>
+                    element={<HomePage key="flows" type="flows" />}
+                  />
                   <Route
                     path="components/"
-                    element={
-                      ENABLE_HOMEPAGE ? (
-                        <HomePage key="components" type="components" />
-                      ) : (
-                        <MyCollectionComponent
-                          key="components"
-                          type="component"
-                        />
-                      )
-                    }
+                    element={<HomePage key="components" type="components" />}
                   >
                     <Route
                       path="folder/:folderId"
-                      element={
-                        ENABLE_HOMEPAGE ? (
-                          <HomePage key="components" type="components" />
-                        ) : (
-                          <MyCollectionComponent
-                            key="components"
-                            type="component"
-                          />
-                        )
-                      }
+                      element={<HomePage key="components" type="components" />}
                     />
                   </Route>
                   <Route
                     path="all/"
-                    element={
-                      ENABLE_HOMEPAGE ? (
-                        <HomePage key="flows" type="flows" />
-                      ) : (
-                        <MyCollectionComponent key="all" type="all" />
-                      )
-                    }
+                    element={<HomePage key="flows" type="flows" />}
                   >
                     <Route
                       path="folder/:folderId"
-                      element={
-                        ENABLE_HOMEPAGE ? (
-                          <HomePage key="flows" type="flows" />
-                        ) : (
-                          <MyCollectionComponent key="all" type="all" />
-                        )
-                      }
+                      element={<HomePage key="flows" type="flows" />}
+                    />
+                  </Route>
+                  <Route
+                    path="mcp/"
+                    element={<HomePage key="mcp" type="mcp" />}
+                  >
+                    <Route
+                      path="folder/:folderId"
+                      element={<HomePage key="mcp" type="mcp" />}
                     />
                   </Route>
                 </Route>
@@ -154,6 +152,14 @@ const router = createBrowserRouter(
                     path="global-variables"
                     element={<GlobalVariablesPage />}
                   />
+                  <Route
+                    path="model-providers"
+                    element={<ModelProvidersPage />}
+                  />
+                  <Route path="db-providers" element={<DBProvidersPage />} />
+                  <Route path="mcp-servers" element={<MCPServersPage />} />
+                  <Route path="mcp-client" element={<McpClientPage />} />
+
                   <Route path="api-keys" element={<ApiKeysPage />} />
                   <Route
                     path="general/:scrollId?"
@@ -165,23 +171,9 @@ const router = createBrowserRouter(
                   />
                   <Route path="shortcuts" element={<ShortcutsPage />} />
                   <Route path="messages" element={<MessagesPage />} />
+                  {CustomRoutesStore()}
                 </Route>
-                <Route
-                  path="store"
-                  element={
-                    <StoreGuard>
-                      <StorePage />
-                    </StoreGuard>
-                  }
-                />
-                <Route
-                  path="store/:id/"
-                  element={
-                    <StoreGuard>
-                      <StorePage />
-                    </StoreGuard>
-                  }
-                />
+                {CustomRoutesStorePages()}
                 <Route path="account">
                   <Route path="delete" element={<DeleteAccountPage />}></Route>
                 </Route>
@@ -195,14 +187,11 @@ const router = createBrowserRouter(
                 />
               </Route>
               <Route path="flow/:id/">
-                <Route path="" element={<DashboardWrapperPage />}>
+                <Route path="" element={<CustomDashboardWrapperPage />}>
                   <Route path="folder/:folderId/" element={<FlowPage />} />
                   <Route path="" element={<FlowPage />} />
                 </Route>
                 <Route path="view" element={<ViewPage />} />
-              </Route>
-              <Route path="playground/:id/">
-                <Route path="" element={<PlaygroundPage />} />
               </Route>
             </Route>
           </Route>

@@ -1,8 +1,8 @@
 import pytest
-from aiofile import async_open
-from langflow.components.inputs import ChatInput, TextInputComponent
-from langflow.schema.message import Message
-from langflow.utils.constants import MESSAGE_SENDER_AI, MESSAGE_SENDER_NAME_USER, MESSAGE_SENDER_USER
+from anyio import Path
+from lfx.components.input_output import ChatInput, TextInputComponent
+from lfx.schema.message import Message
+from lfx.utils.constants import MESSAGE_SENDER_AI, MESSAGE_SENDER_NAME_USER, MESSAGE_SENDER_USER
 
 from tests.base import ComponentTestBaseWithClient, ComponentTestBaseWithoutClient
 
@@ -22,19 +22,14 @@ class TestChatInput(ComponentTestBaseWithClient):
             "sender_name": MESSAGE_SENDER_NAME_USER,
             "session_id": "test_session_123",
             "files": [],
-            "background_color": "#f0f0f0",
-            "chat_icon": "👤",
-            "text_color": "#000000",
         }
 
     @pytest.fixture
     def file_names_mapping(self):
         return [
-            {"version": "1.0.15", "module": "inputs", "file_name": "ChatInput"},
-            {"version": "1.0.16", "module": "inputs", "file_name": "ChatInput"},
-            {"version": "1.0.17", "module": "inputs", "file_name": "ChatInput"},
-            {"version": "1.0.18", "module": "inputs", "file_name": "ChatInput"},
             {"version": "1.0.19", "module": "inputs", "file_name": "ChatInput"},
+            {"version": "1.1.0", "module": "inputs", "file_name": "chat"},
+            {"version": "1.1.1", "module": "inputs", "file_name": "chat"},
         ]
 
     async def test_message_response(self, component_class, default_kwargs):
@@ -49,15 +44,17 @@ class TestChatInput(ComponentTestBaseWithClient):
         assert message.session_id == default_kwargs["session_id"]
         assert message.files == default_kwargs["files"]
         assert message.properties.model_dump() == {
-            "background_color": default_kwargs["background_color"],
-            "text_color": default_kwargs["text_color"],
-            "icon": default_kwargs["chat_icon"],
+            "background_color": None,
+            "text_color": None,
+            "icon": None,
             "positive_feedback": None,
             "edited": False,
             "source": {"id": None, "display_name": None, "source": None},
             "allow_markdown": False,
             "state": "complete",
             "targets": [],
+            "usage": None,
+            "build_duration": None,
         }
 
     async def test_message_response_ai_sender(self, component_class):
@@ -92,9 +89,8 @@ class TestChatInput(ComponentTestBaseWithClient):
     async def test_message_response_with_files(self, component_class, tmp_path):
         """Test message response with file attachments."""
         # Create a temporary test file
-        test_file = tmp_path / "test.txt"
-        async with async_open(test_file, "w") as f:
-            await f.write("Test content")
+        test_file = Path(tmp_path) / "test.txt"
+        await test_file.write_text("Test content", encoding="utf-8")
 
         kwargs = {
             "input_value": "Message with file",
@@ -142,9 +138,7 @@ class TestTextInputComponent(ComponentTestBaseWithoutClient):
     @pytest.fixture
     def file_names_mapping(self):
         return [
-            {"version": "1.0.15", "module": "inputs", "file_name": "TextInput"},
-            {"version": "1.0.16", "module": "inputs", "file_name": "TextInput"},
-            {"version": "1.0.17", "module": "inputs", "file_name": "TextInput"},
-            {"version": "1.0.18", "module": "inputs", "file_name": "TextInput"},
             {"version": "1.0.19", "module": "inputs", "file_name": "TextInput"},
+            {"version": "1.1.0", "module": "inputs", "file_name": "text"},
+            {"version": "1.1.1", "module": "inputs", "file_name": "text"},
         ]

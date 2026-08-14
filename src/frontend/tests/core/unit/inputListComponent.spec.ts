@@ -1,6 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../../fixtures";
 import { adjustScreenView } from "../../utils/adjust-screen-view";
 import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { TEXTS } from "../../utils/constants/texts";
+import {
+  closeParametersPanel,
+  openParametersPanel,
+} from "../../utils/open-advanced-options";
 
 test(
   "InputListComponent",
@@ -10,17 +15,33 @@ test(
 
     await page.getByTestId("blank-flow").click();
     await page.getByTestId("sidebar-search-input").click();
-    await page.getByTestId("sidebar-search-input").fill("url");
+    await page.getByTestId("sidebar-search-input").fill(TEXTS.searchUrl);
 
-    await page.waitForSelector('[data-testid="dataURL"]', {
+    await page.waitForSelector('[data-testid="data_sourceURL"]', {
       timeout: 3000,
     });
     await page
-      .getByTestId("dataURL")
-      .dragTo(page.locator('//*[@id="react-flow-id"]'));
-    await page.mouse.up();
-    await page.mouse.down();
+      .getByTestId("data_sourceURL")
+      .hover()
+      .then(async () => {
+        await page.getByTestId("add-component-button-url").click();
+      });
     await adjustScreenView(page);
+
+    await page.getByTestId("inputlist_str_urls_0").fill("test test test test");
+
+    // Test cursor position preservation
+    const input = page.getByTestId("inputlist_str_urls_0");
+    await input.click();
+    await input.press("Home"); // Move cursor to start
+    await input.press("ArrowRight"); // Move cursor to position 1
+    await input.press("ArrowRight"); // Move cursor to position 2
+    await input.pressSequentially("XD", { delay: 100 }); // Type at position 2
+
+    const cursorValue = await input.inputValue();
+    if (!cursorValue.startsWith("teXD")) {
+      expect(false).toBeTruthy();
+    }
 
     await page.getByTestId("inputlist_str_urls_0").fill("test test test test");
 
@@ -37,8 +58,10 @@ test(
       .fill("test2 test2 test2 test2");
 
     await page.getByTestId("div-generic-node").click();
-    await page.getByTestId("more-options-modal").click();
-    await page.getByTestId("advanced-button-modal").click();
+
+    // LE-1810: the panel only manages parameters — list values stay editable
+    // on the node itself.
+    await openParametersPanel(page);
 
     const value0 = await page.getByTestId("inputlist_str_urls_0").inputValue();
     const value1 = await page.getByTestId("inputlist_str_urls_1").inputValue();
@@ -53,93 +76,50 @@ test(
       expect(false).toBeTruthy();
     }
 
-    await page.getByTestId("input-list-minus-btn-edit_urls-1").click();
+    await closeParametersPanel(page);
 
-    const plusButtonLocator = page.getByTestId(
-      "input-list-minus-btn-edit_urls-1",
+    await page.getByTestId("input-list-delete-btn_urls-0").click();
+
+    expect(await page.getByTestId("input-list-delete-btn_urls-2").count()).toBe(
+      0,
     );
-    const elementCount = await plusButtonLocator?.count();
 
-    if (elementCount > 1) {
-      expect(false).toBeTruthy();
-    }
+    await page.getByTestId("input-list-delete-btn_urls-1").click();
 
-    await page.getByText("Close").last().click();
-
-    await page.getByTestId("input-list-minus-btn_urls-2").isHidden();
+    expect(await page.getByTestId("input-list-delete-btn_urls-1").count()).toBe(
+      0,
+    );
 
     await page.getByTestId("input-list-plus-btn_urls-0").click();
     await page.getByTestId("input-list-plus-btn_urls-0").click();
+    await page.getByTestId("input-list-plus-btn_urls-0").click();
 
-    await page.getByTestId("inputlist_str_urls_0").fill("test test test test");
-    await page
-      .getByTestId("inputlist_str_urls_1")
-      .fill("test1 test1 test1 test1");
-    await page
-      .getByTestId("inputlist_str_urls_2")
-      .fill("test2 test2 test2 test2");
-    await page
-      .getByTestId("inputlist_str_urls_3")
-      .fill("test3 test3 test3 test3");
-
-    await page.getByTestId("div-generic-node").click();
-    await page.getByTestId("more-options-modal").click();
-    await page.getByTestId("advanced-button-modal").click();
-
-    const value0Edit = await page
-      .getByTestId("inputlist_str_edit_urls_0")
-      .inputValue();
-    const value1Edit = await page
-      .getByTestId("inputlist_str_edit_urls_1")
-      .inputValue();
-    const value2Edit = await page
-      .getByTestId("inputlist_str_edit_urls_2")
-      .inputValue();
-    const value3Edit = await page
-      .getByTestId("inputlist_str_edit_urls_3")
-      .inputValue();
-
-    if (
-      value0Edit !== "test test test test" ||
-      value1Edit !== "test1 test1 test1 test1" ||
-      value2Edit !== "test2 test2 test2 test2" ||
-      value3Edit !== "test3 test3 test3 test3"
-    ) {
-      expect(false).toBeTruthy();
-    }
-
-    await page.getByTestId("input-list-minus-btn-edit_urls-1").click();
-    await page.getByTestId("input-list-minus-btn-edit_urls-1").click();
-    await page.getByTestId("input-list-minus-btn-edit_urls-1").click();
-
-    const plusButtonLocatorEdit0 = await page.getByTestId(
-      "input-list-plus-btn-edit_urls-0",
-    );
-    const elementCountEdit0 = await plusButtonLocatorEdit0?.count();
-
-    const plusButtonLocatorEdit2 = await page.getByTestId(
-      "input-list-plus-btn-edit_urls-1",
-    );
-    const elementCountEdit2 = await plusButtonLocatorEdit2?.count();
-
-    if (elementCountEdit0 > 1 || elementCountEdit2 > 0) {
-      expect(false).toBeTruthy();
-    }
-
-    const minusButtonLocatorEdit1 = await page.getByTestId(
-      "input-list-minus-btn-edit_urls-1",
+    expect(await page.getByTestId("input-list-delete-btn_urls-0").count()).toBe(
+      1,
     );
 
-    const elementCountMinusEdit1 = await minusButtonLocatorEdit1?.count();
-
-    const minusButtonLocatorEdit2 = await page.getByTestId(
-      "input-list-minus-btn-edit_urls-2",
+    expect(await page.getByTestId("input-list-delete-btn_urls-1").count()).toBe(
+      1,
     );
 
-    const elementCountMinusEdit2 = await minusButtonLocatorEdit2?.count();
+    expect(await page.getByTestId("input-list-delete-btn_urls-2").count()).toBe(
+      1,
+    );
 
-    if (elementCountMinusEdit1 > 1 || elementCountMinusEdit2 > 0) {
-      expect(false).toBeTruthy();
-    }
+    expect(await page.getByTestId("input-list-delete-btn_urls-3").count()).toBe(
+      1,
+    );
+
+    expect(await page.getByTestId("input-list-delete-btn_urls-4").count()).toBe(
+      0,
+    );
+
+    expect(await page.getByTestId("inputlist_str_urls_0").inputValue()).toBe(
+      "test1 test1 test1 test1",
+    );
+
+    expect(await page.getByTestId("inputlist_str_urls_1").inputValue()).toBe(
+      "",
+    );
   },
 );

@@ -1,4 +1,3 @@
-import { cn } from "@/utils/utils";
 import {
   NumberDecrementStepper,
   NumberIncrementStepper,
@@ -8,8 +7,11 @@ import {
 } from "@chakra-ui/number-input";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { cn } from "@/utils/utils";
 import { handleKeyDown } from "../../../../../utils/reactflowUtils";
-import { FloatComponentType, InputProps } from "../../types";
+import { getNodeScopedDomId } from "../../helpers/get-node-scoped-dom-id";
+import type { FloatComponentType, InputProps } from "../../types";
 
 export default function FloatComponent({
   value,
@@ -18,10 +20,16 @@ export default function FloatComponent({
   disabled,
   editNode = false,
   id = "",
-}: InputProps<number, FloatComponentType>): JSX.Element {
+  nodeId,
+  showParameter = true,
+}: InputProps<number, FloatComponentType>): JSX.Element | null {
+  const { t } = useTranslation();
   const step = rangeSpec?.step ?? 0.1;
-  const min = rangeSpec?.min ?? -2;
-  const max = rangeSpec?.max ?? 2;
+  const min = rangeSpec?.min;
+  const max = rangeSpec?.max;
+
+  // Local state for input value
+  const [localValue, setLocalValue] = useState<string>(value.toString());
 
   // Clear component state
   useEffect(() => {
@@ -30,20 +38,29 @@ export default function FloatComponent({
     }
   }, [disabled, handleOnNewValue]);
 
+  // Update local value when prop changes
+  useEffect(() => {
+    setLocalValue(value.toString());
+  }, [value]);
+
   const [cursor, setCursor] = useState<number | null>(null);
   const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     ref.current?.setSelectionRange(cursor, cursor);
-  }, [ref, cursor, value]);
+  }, [ref, cursor, localValue]);
 
   const handleChangeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCursor(e.target.selectionStart);
-    handleOnNewValue({ value: Number(e.target.value) });
+    setLocalValue(e.target.value);
+  };
+
+  const handleBlur = () => {
+    handleOnNewValue({ value: Number(localValue) });
   };
 
   const handleNumberChange = (newValue) => {
-    handleOnNewValue({ value: Number(newValue) });
+    setLocalValue(newValue);
   };
 
   const handleInputChange = (event) => {
@@ -71,25 +88,33 @@ export default function FloatComponent({
     "hover:rounded-br-[5px] hover:bg-muted group-decrement";
   const inputRef = useRef(null);
 
+  if (!showParameter) {
+    return null;
+  }
+
   return (
     <div className="w-full">
       <NumberInput
-        id={id}
+        id={getNodeScopedDomId(id, nodeId)}
         step={step}
         min={min}
         max={max}
         onChange={handleNumberChange}
-        value={value ?? ""}
+        value={localValue ?? ""}
+        onBlur={handleBlur}
       >
         <NumberInputField
           className={getInputClassName()}
           onChange={handleChangeInput}
-          onKeyDown={(event) => handleKeyDown(event, value, "")}
+          onKeyDown={(event) => handleKeyDown(event, localValue, "")}
           onInput={handleInputChange}
           disabled={disabled}
-          placeholder={editNode ? "Float number" : "Type a float number"}
+          placeholder={
+            editNode ? t("input.floatNumberShort") : t("input.floatNumberFull")
+          }
           data-testid={id}
           ref={inputRef}
+          onBlur={handleBlur}
         />
         <NumberInputStepper className={stepperClassName}>
           <NumberIncrementStepper className={incrementStepperClassName}>

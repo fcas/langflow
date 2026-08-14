@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from loguru import logger
+from lfx.graph.vertex.base import Vertex
+from lfx.log.logger import logger
+from lfx.processing.utils import validate_and_repair_json
 from pydantic import BaseModel
 
-from langflow.graph.vertex.base import Vertex
-from langflow.processing.utils import validate_and_repair_json
 from langflow.schema.graph import InputValue, Tweaks
 from langflow.schema.schema import INPUT_FIELD_NAME
 from langflow.services.deps import get_settings_service
 
 if TYPE_CHECKING:
-    from langflow.api.v1.schemas import InputValueRequest
-    from langflow.graph.graph.base import Graph
-    from langflow.graph.schema import RunOutputs
+    from lfx.events.event_manager import EventManager
+    from lfx.graph.graph.base import Graph
+    from lfx.graph.schema import RunOutputs
+    from lfx.schema.schema import InputValueRequest
 
 
 class Result(BaseModel):
@@ -30,6 +31,7 @@ async def run_graph_internal(
     session_id: str | None = None,
     inputs: list[InputValueRequest] | None = None,
     outputs: list[str] | None = None,
+    event_manager: EventManager | None = None,
 ) -> tuple[list[RunOutputs], str]:
     """Run the graph and generate the result."""
     inputs = inputs or []
@@ -39,7 +41,7 @@ async def run_graph_internal(
     types = []
     for input_value_request in inputs:
         if input_value_request.input_value is None:
-            logger.warning("InputValueRequest input_value cannot be None, defaulting to an empty string.")
+            await logger.awarning("InputValueRequest input_value cannot be None, defaulting to an empty string.")
             input_value_request.input_value = ""
         components.append(input_value_request.components or [])
         inputs_list.append({INPUT_FIELD_NAME: input_value_request.input_value})
@@ -55,6 +57,7 @@ async def run_graph_internal(
         stream=stream,
         session_id=effective_session_id or "",
         fallback_to_env_vars=fallback_to_env_vars,
+        event_manager=event_manager,
     )
     return run_outputs, effective_session_id
 
@@ -68,6 +71,7 @@ async def run_graph(
     session_id: str | None = None,
     fallback_to_env_vars: bool = False,
     output_component: str | None = None,
+    stream: bool = False,
 ) -> list[RunOutputs]:
     """Runs the given Langflow Graph with the specified input and returns the outputs.
 
@@ -80,6 +84,7 @@ async def run_graph(
         fallback_to_env_vars (bool, optional): Whether to fallback to environment variables.
             Defaults to False.
         output_component (Optional[str], optional): The specific output component to retrieve. Defaults to None.
+        stream (bool, optional): Whether to stream the results or not. Defaults to False.
 
     Returns:
         List[RunOutputs]: A list of RunOutputs objects representing the outputs of the graph.
@@ -100,7 +105,7 @@ async def run_graph(
     types = []
     for input_value_request in inputs:
         if input_value_request.input_value is None:
-            logger.warning("InputValueRequest input_value cannot be None, defaulting to an empty string.")
+            await logger.awarning("InputValueRequest input_value cannot be None, defaulting to an empty string.")
             input_value_request.input_value = ""
         components.append(input_value_request.components or [])
         inputs_list.append({INPUT_FIELD_NAME: input_value_request.input_value})
@@ -110,7 +115,7 @@ async def run_graph(
         inputs_components=components,
         types=types,
         outputs=outputs or [],
-        stream=False,
+        stream=stream,
         session_id=session_id,
         fallback_to_env_vars=fallback_to_env_vars,
     )
@@ -139,26 +144,82 @@ def apply_tweaks(node: dict[str, Any], node_tweaks: dict[str, Any]) -> None:
         logger.warning(f"Template data for node {node.get('id')} should be a dictionary")
         return
 
+    # Security: tweaks must never inject executable code, widen the code sandbox,
+    # or repoint a protected sink configured by the flow author.
+    # The previous name-only block on "code" was bypassable because code-execution
+    # components expose their code under other field names (python_code, tool_code,
+    # filter_instruction) that serialize as plain "str". Refuse a tweak when the
+    # field is code-typed, literally named "code", or is a code/sandbox input on a
+    # code-execution component — while leaving benign fields (name, description,
+    # data, ...) on those components tweakable.
+    from lfx.utils.flow_validation import (
+        CODE_EXECUTION_COMPONENT_TYPES,
+        CODE_EXECUTION_FIELD_NAMES,
+        PROTECTED_TWEAK_FIELDS_BY_COMPONENT,
+    )
+
+    component_type = node.get("data", {}).get("type")
+    is_code_exec_component = component_type in CODE_EXECUTION_COMPONENT_TYPES
+    protected_tweak_fields = PROTECTED_TWEAK_FIELDS_BY_COMPONENT.get(component_type, ())
     for tweak_name, tweak_value in node_tweaks.items():
         if tweak_name not in template_data:
             continue
-        if tweak_name in template_data:
-            if template_data[tweak_name]["type"] == "NestedDict":
-                value = validate_and_repair_json(tweak_value)
-                template_data[tweak_name]["value"] = value
-            elif isinstance(tweak_value, dict):
-                for k, v in tweak_value.items():
-                    k_ = "file_path" if template_data[tweak_name]["type"] == "file" else k
-                    template_data[tweak_name][k_] = v
+        field_type = template_data[tweak_name].get("type", "")
+        if (
+            field_type == "code"
+            or tweak_name == "code"
+            or (is_code_exec_component and tweak_name in CODE_EXECUTION_FIELD_NAMES)
+        ):
+            logger.warning(f"Security: refusing to override code field {tweak_name!r} via tweaks.")
+            continue
+        if tweak_name in protected_tweak_fields:
+            logger.warning(f"Security: refusing to override protected field {tweak_name!r} via tweaks.")
+            continue
+        if field_type == "NestedDict":
+            value = validate_and_repair_json(tweak_value)
+            template_data[tweak_name]["value"] = value
+        elif field_type == "mcp":
+            # MCP fields expect dict values to be set directly
+            template_data[tweak_name]["value"] = tweak_value
+        elif field_type == "dict" and isinstance(tweak_value, dict):
+            # Dict fields: set the dict directly as the value.
+            # If the tweak is wrapped in {"value": <actual>}, unwrap it
+            # to support the template-format style (e.g. from UI exports).
+            # Caveat: a legitimate single-key dict {"value": x} will be unwrapped.
+            if len(tweak_value) == 1 and "value" in tweak_value:
+                template_data[tweak_name]["value"] = tweak_value["value"]
             else:
-                key = "file_path" if template_data[tweak_name]["type"] == "file" else "value"
-                template_data[tweak_name][key] = tweak_value
+                template_data[tweak_name]["value"] = tweak_value
+        elif isinstance(tweak_value, dict):
+            for k, v in tweak_value.items():
+                k_ = "file_path" if field_type == "file" else k
+                template_data[tweak_name][k_] = v
+            # If the user didn't explicitly set load_from_db in the dict,
+            # we default to False for the override.
+            if "load_from_db" not in tweak_value and "load_from_db" in template_data[tweak_name]:
+                template_data[tweak_name]["load_from_db"] = False
+        else:
+            key = "file_path" if field_type == "file" else "value"
+            template_data[tweak_name][key] = tweak_value
+            if "load_from_db" in template_data[tweak_name]:
+                template_data[tweak_name]["load_from_db"] = False
 
 
 def apply_tweaks_on_vertex(vertex: Vertex, node_tweaks: dict[str, Any]) -> None:
     for tweak_name, tweak_value in node_tweaks.items():
         if tweak_name and tweak_value and tweak_name in vertex.params:
             vertex.params[tweak_name] = tweak_value
+
+            # Determine if we should load from DB
+            tweak_load_from_db = False
+            if isinstance(tweak_value, dict):
+                tweak_load_from_db = tweak_value.get("load_from_db", False)
+
+            if tweak_load_from_db:
+                if tweak_name not in vertex.load_from_db_fields:
+                    vertex.load_from_db_fields.append(tweak_name)
+            elif tweak_name in vertex.load_from_db_fields:
+                vertex.load_from_db_fields.remove(tweak_name)
 
 
 def process_tweaks(

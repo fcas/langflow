@@ -2,22 +2,19 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from lfx.utils.util_strings import escape_like_pattern
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from langflow.api.utils import CurrentActiveUser, DbSession
-from langflow.api.v1.schemas import UsersResponse
-from langflow.services.auth.utils import (
-    get_current_active_superuser,
-    get_password_hash,
-    verify_password,
-)
-from langflow.services.database.models.folder.utils import create_default_folder_if_it_doesnt_exist
-from langflow.services.database.models.user import User, UserCreate, UserRead, UserUpdate
+from langflow.api.v1.schemas import PasswordResetRequest, UsersResponse
+from langflow.initial_setup.setup import get_or_create_default_folder
+from langflow.services.auth.utils import get_current_active_superuser, get_current_user_optional
 from langflow.services.database.models.user.crud import get_user_by_id, update_user
-from langflow.services.deps import get_settings_service
+from langflow.services.database.models.user.model import User, UserCreate, UserRead, UserUpdate
+from langflow.services.deps import get_auth_service, get_settings_service
 
 router = APIRouter(tags=["Users"], prefix="/users")
 
@@ -26,20 +23,43 @@ router = APIRouter(tags=["Users"], prefix="/users")
 async def add_user(
     user: UserCreate,
     session: DbSession,
+    current_user: Annotated[User | None, Depends(get_current_user_optional)],
 ) -> User:
-    """Add a new user to the database."""
+    """Add a new user to the database.
+
+    This endpoint backs two flows that share the same route:
+
+    * Public sign up (unauthenticated). Allowed only when public registration is
+      enabled for the deployment, i.e. AUTO_LOGIN is off (multi-user mode) and
+      ENABLE_SIGNUP is True.
+    * Admin "add user" (authenticated active superuser). Always allowed,
+      regardless of the sign up settings, so disabling public sign up does not
+      break superuser-driven user creation.
+
+    User activation is controlled by the NEW_USER_IS_ACTIVE setting.
+    """
+    settings_service = get_settings_service()
+    auth_settings = settings_service.auth_settings
+    # An authenticated active superuser (the admin "add user" flow) may always
+    # create users. For every other caller this endpoint is effectively
+    # unauthenticated, so refuse it unless public sign up is intended for this
+    # deployment. get_current_user_optional returns None for credential-less
+    # requests, so the anonymous path can never be promoted to superuser.
+    is_superuser_caller = current_user is not None and current_user.is_active and current_user.is_superuser
+    if not is_superuser_caller and (auth_settings.AUTO_LOGIN or not auth_settings.ENABLE_SIGNUP):
+        raise HTTPException(status_code=403, detail="Public user registration is disabled.")
+
     new_user = User.model_validate(user, from_attributes=True)
     try:
-        new_user.password = get_password_hash(user.password)
-        new_user.is_active = get_settings_service().auth_settings.NEW_USER_IS_ACTIVE
+        new_user.password = get_auth_service().get_password_hash(user.password)
+        new_user.is_active = settings_service.auth_settings.NEW_USER_IS_ACTIVE
         session.add(new_user)
-        await session.commit()
+        await session.flush()
         await session.refresh(new_user)
-        folder = await create_default_folder_if_it_doesnt_exist(session, new_user.id)
+        folder = await get_or_create_default_folder(session, new_user.id)
         if not folder:
-            raise HTTPException(status_code=500, detail="Error creating default folder")
+            raise HTTPException(status_code=500, detail="Error creating default project")
     except IntegrityError as e:
-        await session.rollback()
         raise HTTPException(status_code=400, detail="This username is unavailable.") from e
 
     return new_user
@@ -58,13 +78,20 @@ async def read_all_users(
     *,
     skip: int = 0,
     limit: int = 10,
+    search: str | None = None,
     session: DbSession,
 ) -> UsersResponse:
     """Retrieve a list of users from the database with pagination."""
-    query: SelectOfScalar = select(User).offset(skip).limit(limit)
-    users = (await session.exec(query)).fetchall()
-
+    query: SelectOfScalar = select(User)
     count_query = select(func.count()).select_from(User)
+
+    if search:
+        search_filter = User.username.ilike(f"%{escape_like_pattern(search)}%", escape="\\")  # type: ignore[attr-defined]
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    query = query.offset(skip).limit(limit)
+    users = (await session.exec(query)).fetchall()
     total_count = (await session.exec(count_query)).first()
 
     return UsersResponse(
@@ -83,6 +110,10 @@ async def patch_user(
     """Update an existing user's data."""
     update_password = bool(user_update.password)
 
+    # Prevent users from deactivating their own account to avoid lockout
+    if user.id == user_id and user_update.is_active is False:
+        raise HTTPException(status_code=403, detail="You can't deactivate your own user account")
+
     if not user.is_superuser and user_update.is_superuser:
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -91,7 +122,7 @@ async def patch_user(
     if update_password:
         if not user.is_superuser:
             raise HTTPException(status_code=400, detail="You can't change your password here")
-        user_update.password = get_password_hash(user_update.password)
+        user_update.password = get_auth_service().get_password_hash(user_update.password)
 
     if user_db := await get_user_by_id(session, user_id):
         if not update_password:
@@ -103,21 +134,28 @@ async def patch_user(
 @router.patch("/{user_id}/reset-password", response_model=UserRead)
 async def reset_password(
     user_id: UUID,
-    user_update: UserUpdate,
+    password_reset: PasswordResetRequest,
     user: CurrentActiveUser,
     session: DbSession,
 ) -> User:
-    """Reset a user's password."""
+    """Change the current user's password after verifying the existing password."""
     if user_id != user.id:
-        raise HTTPException(status_code=400, detail="You can't change another user's password")
+        raise HTTPException(status_code=404, detail="You can't change another user's password")
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if verify_password(user_update.password, user.password):
+
+    auth = get_auth_service()
+    if not auth.verify_password(password_reset.current_password, user.password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    if auth.verify_password(password_reset.password, user.password):
         raise HTTPException(status_code=400, detail="You can't use your current password")
-    new_password = get_password_hash(user_update.password)
+
+    new_password = auth.get_password_hash(password_reset.password)
     user.password = new_password
-    await session.commit()
+
+    await session.flush()
     await session.refresh(user)
 
     return user
@@ -140,7 +178,11 @@ async def delete_user(
     if not user_db:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # IMPORTANT:
+    # This endpoint intentionally performs a DB-cascade delete only and does
+    # not issue provider-side teardown across all user deployments.
+    # The trade-off is to avoid destructive bulk deletion of external
+    # deployment resources during user deletion.
     await session.delete(user_db)
-    await session.commit()
-
+    await session.flush()
     return {"detail": "User deleted"}

@@ -1,4 +1,8 @@
 import ShadTooltip from "@/components/common/shadTooltipComponent";
+import {
+  CHAT_UPLOAD_ATTACHMENT_ACCEPT,
+  CHAT_UPLOAD_ATTACHMENT_TOOLTIP,
+} from "@/constants/file-upload-constants";
 import ForwardedIconComponent from "../../../../../../components/common/genericIconComponent";
 import { Button } from "../../../../../../components/ui/button";
 
@@ -6,33 +10,40 @@ const UploadFileButton = ({
   fileInputRef,
   handleFileChange,
   handleButtonClick,
-  lockChat,
+  isBuilding,
 }) => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    handleButtonClick();
+  };
+
   return (
     <ShadTooltip
       styleClasses="z-50"
       side="right"
-      content="Attach image (png, jpg, jpeg)"
+      content={CHAT_UPLOAD_ATTACHMENT_TOOLTIP}
     >
       <div>
         <input
-          disabled={lockChat}
+          disabled={isBuilding}
           type="file"
           ref={fileInputRef}
           style={{ display: "none" }}
           onChange={handleFileChange}
+          accept={CHAT_UPLOAD_ATTACHMENT_ACCEPT}
         />
         <Button
-          disabled={lockChat}
-          className={`flex h-[32px] w-[32px] items-center justify-center rounded-md bg-muted font-bold transition-all ${
-            lockChat
+          disabled={isBuilding}
+          className={`h-7 w-7 px-0 flex items-center justify-center ${
+            isBuilding
               ? "cursor-not-allowed"
               : "text-muted-foreground hover:text-primary"
           }`}
-          onClick={handleButtonClick}
+          onClick={handleClick}
           unstyled
+          aria-label={CHAT_UPLOAD_ATTACHMENT_TOOLTIP}
         >
-          <ForwardedIconComponent className="h-[18px] w-[18px]" name="Image" />
+          <ForwardedIconComponent className="h-[18px] w-[18px]" name="File" />
         </Button>
       </div>
     </ShadTooltip>

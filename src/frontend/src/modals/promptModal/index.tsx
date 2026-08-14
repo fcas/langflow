@@ -1,5 +1,7 @@
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { usePostValidatePrompt } from "@/controllers/API/queries/nodes/use-post-validate-prompt";
-import React, { useEffect, useRef, useState } from "react";
 import IconComponent from "../../components/common/genericIconComponent";
 import SanitizedHTMLWrapper from "../../components/common/sanitizedHTMLWrapper";
 import ShadTooltip from "../../components/common/shadTooltipComponent";
@@ -7,20 +9,12 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import {
-  BUG_ALERT,
-  PROMPT_ERROR_ALERT,
-  PROMPT_SUCCESS_ALERT,
-  TEMP_NOTICE_ALERT,
-} from "../../constants/alerts_constants";
-import {
-  EDIT_TEXT_PLACEHOLDER,
   INVALID_CHARACTERS,
   MAX_WORDS_HIGHLIGHT,
-  PROMPT_DIALOG_SUBTITLE,
   regexHighlight,
 } from "../../constants/constants";
 import useAlertStore from "../../stores/alertStore";
-import { PromptModalType } from "../../types/components";
+import type { PromptModalType } from "../../types/components";
 import { handleKeyDown } from "../../utils/reactflowUtils";
 import { classNames } from "../../utils/utils";
 import BaseModal from "../baseModal";
@@ -37,6 +31,7 @@ export default function PromptModal({
   id = "",
   readonly = false,
 }: PromptModalType): JSX.Element {
+  const { t } = useTranslation();
   const [modalOpen, setModalOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value);
   const [isEdit, setIsEdit] = useState(true);
@@ -45,7 +40,7 @@ export default function PromptModal({
   const setErrorData = useAlertStore((state) => state.setErrorData);
   const setNoticeData = useAlertStore((state) => state.setNoticeData);
   const divRef = useRef(null);
-  const divRefPrompt = useRef(null);
+  const _divRefPrompt = useRef(null);
   const { mutate: postValidatePrompt } = usePostValidatePrompt();
   const [clickPosition, setClickPosition] = useState({ x: 0, y: 0 });
   const [scrollPosition, setScrollPosition] = useState(0);
@@ -53,19 +48,27 @@ export default function PromptModal({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   function checkVariables(valueToCheck: string): void {
-    const regex = /\{([^{}]+)\}/g;
+    // Match *any* brace run around an identifier
+    const regex = /(\{+)([^{}]+)(\}+)/g;
     const matches: string[] = [];
-    let match;
-    while ((match = regex.exec(valueToCheck))) {
-      matches.push(`{${match[1]}}`);
+    let match: RegExpExecArray | null = regex.exec(valueToCheck);
+
+    while (match) {
+      const [openRun, varName, closeRun] = [match[1], match[2], match[3]];
+
+      // keep only odd, balanced runs (actual variables)
+      if (openRun.length === closeRun.length && openRun.length % 2 === 1) {
+        matches.push(`{${varName}}`); // normalise to single-brace form
+      }
+      match = regex.exec(valueToCheck);
     }
 
-    let invalid_chars: string[] = [];
-    let fixed_variables: string[] = [];
-    let input_variables = matches;
-    for (let variable of input_variables) {
-      let new_var = variable;
-      for (let char of INVALID_CHARACTERS) {
+    const invalid_chars: string[] = [];
+    const fixed_variables: string[] = [];
+    const input_variables = matches;
+    for (const variable of input_variables) {
+      const new_var = variable;
+      for (const char of INVALID_CHARACTERS) {
         if (variable.includes(char)) {
           invalid_chars.push(new_var);
         }
@@ -89,18 +92,22 @@ export default function PromptModal({
   const coloredContent = (typeof inputValue === "string" ? inputValue : "")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(regexHighlight, (match, p1, p2) => {
-      // Decide which group was matched. If p1 is not undefined, do nothing
-      // we don't want to change the text. If p2 is not undefined, then we
-      // have a variable, so we should highlight it.
-      // ! This will not work with multiline or indented json yet
-      if (p1 !== undefined) {
-        return match;
-      } else if (p2 !== undefined) {
-        return varHighlightHTML({ name: p2 });
-      }
+    .replace(regexHighlight, (match, openRun, varName, closeRun) => {
+      // 1) Only highlight when both sides are the *same* length and that
+      //    length is odd (   1,3,5,…  ).
+      const lenOpen = openRun?.length ?? 0;
+      const lenClose = closeRun?.length ?? 0;
+      const isVariable = lenOpen === lenClose && lenOpen % 2 === 1;
 
-      return match;
+      if (!isVariable) return match; // even-brace runs ⇒ escape, no highlight
+
+      // 2) Number of literal braces each side = floor(lenOpen / 2)
+      const literal = "{".repeat(Math.floor(lenOpen / 2));
+      return (
+        literal +
+        varHighlightHTML({ name: varName }) +
+        literal.replace(/\{/g, "}") // same amount of closing braces
+      );
     })
     .replace(/\n/g, "<br />");
 
@@ -139,7 +146,7 @@ export default function PromptModal({
               : (apiReturn?.frontend_node?.custom_fields?.[""] ?? "");
           }
           if (apiReturn) {
-            let inputVariables = apiReturn.input_variables ?? [];
+            const inputVariables = apiReturn.input_variables ?? [];
             if (
               JSON.stringify(apiReturn?.frontend_node) !== JSON.stringify({})
             ) {
@@ -151,24 +158,24 @@ export default function PromptModal({
             }
             if (!inputVariables || inputVariables.length === 0) {
               setNoticeData({
-                title: TEMP_NOTICE_ALERT,
+                title: t("alerts.noTemplateVariables"),
               });
             } else {
               setSuccessData({
-                title: PROMPT_SUCCESS_ALERT,
+                title: t("success.promptReady"),
               });
             }
           } else {
             setIsEdit(true);
             setErrorData({
-              title: BUG_ALERT,
+              title: t("errors.generic"),
             });
           }
         },
         onError: (error) => {
           setIsEdit(true);
           return setErrorData({
-            title: PROMPT_ERROR_ALERT,
+            title: t("errors.prompt"),
             list: [error.response.data.detail ?? ""],
           });
         },
@@ -196,7 +203,8 @@ export default function PromptModal({
 
       // Use caretPositionFromPoint to get the closest text position. Does not work on Safari.
       if ("caretPositionFromPoint" in document) {
-        let range = (document as any).caretPositionFromPoint(x, y)?.offset ?? 0;
+        const range =
+          (document as any).caretPositionFromPoint(x, y)?.offset ?? 0;
         if (range) {
           const position = range;
           textArea.setSelectionRange(position, position);
@@ -217,17 +225,17 @@ export default function PromptModal({
       <BaseModal.Trigger disable={disabled} asChild>
         {children}
       </BaseModal.Trigger>
-      <BaseModal.Header description={PROMPT_DIALOG_SUBTITLE}>
+      <BaseModal.Header>
         <div className="flex w-full items-start gap-3">
           <div className="flex">
-            <span className="pr-2" data-testid="modal-title">
-              Edit Prompt
-            </span>
             <IconComponent
               name="TerminalSquare"
-              className="h-6 w-6 pl-1 text-primary"
+              className="h-6 w-6 pr-1 text-primary"
               aria-hidden="true"
             />
+            <span className="pl-2" data-testid="modal-title">
+              {t("modal.prompt.title")}
+            </span>
           </div>
         </div>
       </BaseModal.Header>
@@ -249,7 +257,7 @@ export default function PromptModal({
                 setInputValue(event.target.value);
                 checkVariables(event.target.value);
               }}
-              placeholder={EDIT_TEXT_PLACEHOLDER}
+              placeholder={t("input.editTextPlaceholder")}
               onKeyDown={(e) => {
                 handleKeyDown(e, inputValue, "");
               }}
@@ -279,7 +287,7 @@ export default function PromptModal({
                     className="flex h-4 w-4 text-primary"
                   />
                   <span className="text-md font-semibold text-primary">
-                    Prompt Variables:
+                    {t("modal.prompt.promptVariables")}
                   </span>
 
                   {Array.from(wordsHighlight).map((word, index) => (
@@ -307,8 +315,7 @@ export default function PromptModal({
                 </div>
               </div>
               <span className="mt-2 text-xs text-muted-foreground">
-                Prompt variables can be created with any chosen name inside
-                curly brackets, e.g. {"{variable_name}"}
+                {t("modal.prompt.variablesHint")}
               </span>
             </div>
           </div>
@@ -321,7 +328,7 @@ export default function PromptModal({
             }}
             type="submit"
           >
-            Check & Save
+            {t("modal.prompt.checkAndSave")}
           </Button>
         </div>
       </BaseModal.Footer>

@@ -1,8 +1,7 @@
-import { FlowType } from "@/types/flow";
 import { useCallback } from "react";
 import { createRoot } from "react-dom/client";
+import type { FlowType } from "@/types/flow";
 import useFlowsManagerStore from "../../../../stores/flowsManagerStore";
-import { storeComponent } from "../../../../types/store";
 import DragCardComponent from "../components/dragCardComponent";
 
 const useDragStart = (data: FlowType) => {
@@ -10,7 +9,7 @@ const useDragStart = (data: FlowType) => {
 
   const onDragStart = useCallback(
     (event) => {
-      let image = <DragCardComponent data={data} />; // Replace with whatever you want here
+      const image = <DragCardComponent data={data} />; // Replace with whatever you want here
 
       const ghost = document.createElement("div");
       ghost.style.transform = "translate(-10000px, -10000px)";

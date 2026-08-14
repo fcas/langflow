@@ -1,7 +1,10 @@
-import { expect, test } from "@playwright/test";
 import { readFileSync } from "fs";
+import { expect, test } from "../../fixtures";
 import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { TEXTS } from "../../utils/constants/texts";
+import { waitForNewProjectButton } from "../../utils/flow/new-project-flow";
 import { simulateDragAndDrop } from "../../utils/simulate-drag-and-drop";
+
 test(
   "user should be able to drag and drop an old collection without crashing the application",
   { tag: ["@release"] },
@@ -10,25 +13,25 @@ test(
 
     //add a new flow just to have the workspace available
     await page.getByTestId("side_nav_options_all-templates").click();
-    await page.getByRole("heading", { name: "Basic Prompting" }).click();
+    await page
+      .getByRole("heading", { name: TEXTS.templateBasicPrompting })
+      .click();
 
-    await page.waitForSelector('[data-testid="fit_view"]', {
+    await page.waitForSelector('[data-testid="canvas_controls_dropdown"]', {
       timeout: 100000,
     });
 
-    await page.waitForSelector('[data-testid="icon-ChevronLeft"]', {
+    await page.waitForSelector('[data-testid="sidebar-search-input"]', {
       timeout: 100000,
     });
 
     await page.getByTestId("icon-ChevronLeft").first().click();
 
-    await page.waitForSelector("text=my projects", {
+    await page.waitForSelector("text=starter project", {
       timeout: 5000,
     });
 
-    await page.waitForSelector('[data-testid="new-project-btn"]', {
-      timeout: 100000,
-    });
+    await waitForNewProjectButton(page, { timeout: 100000 });
 
     await simulateDragAndDrop(
       page,
@@ -64,25 +67,25 @@ test(
 
     //add a new flow just to have the workspace available
     await page.getByTestId("side_nav_options_all-templates").click();
-    await page.getByRole("heading", { name: "Basic Prompting" }).click();
+    await page
+      .getByRole("heading", { name: TEXTS.templateBasicPrompting })
+      .click();
 
-    await page.waitForSelector('[data-testid="fit_view"]', {
+    await page.waitForSelector('[data-testid="canvas_controls_dropdown"]', {
       timeout: 100000,
     });
 
-    await page.waitForSelector('[data-testid="icon-ChevronLeft"]', {
+    await page.waitForSelector('[data-testid="sidebar-search-input"]', {
       timeout: 100000,
     });
 
     await page.getByTestId("icon-ChevronLeft").first().click();
 
-    await page.waitForSelector("text=my projects", {
+    await page.waitForSelector("text=starter project", {
       timeout: 5000,
     });
 
-    await page.waitForSelector('[data-testid="new-project-btn"]', {
-      timeout: 100000,
-    });
+    await waitForNewProjectButton(page, { timeout: 100000 });
     // Read your file into a buffer.
     const jsonContent = readFileSync(
       "tests/assets/flow_test_drag_and_drop.json",

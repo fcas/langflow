@@ -1,15 +1,11 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, field_serializer, field_validator
 from sqlalchemy import Text
-from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+from sqlmodel import JSON, Column, Field, SQLModel
 
-if TYPE_CHECKING:
-    from langflow.services.database.models.flow.model import Flow
-
-from langflow.utils.util_strings import truncate_long_strings
+from langflow.serialization.serialization import get_max_items_length, get_max_text_length, serialize
 
 
 class VertexBuildBase(SQLModel):
@@ -19,7 +15,8 @@ class VertexBuildBase(SQLModel):
     artifacts: dict | None = Field(default=None, sa_column=Column(JSON))
     params: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     valid: bool = Field(nullable=False)
-    flow_id: UUID = Field(foreign_key="flow.id")
+    flow_id: UUID = Field()
+    job_id: UUID | None = Field(default=None, index=True)
 
     # Needed for Column(JSON)
     class Config:
@@ -42,22 +39,36 @@ class VertexBuildBase(SQLModel):
         return value
 
     @field_serializer("data")
-    def serialize_data(self, data: dict) -> dict:
-        return truncate_long_strings(data)
+    def serialize_data(self, data) -> dict:
+        """Serializes the `data` field with enforced limits on text length and item count.
+
+        Returns:
+            dict: The serialized representation of the data field.
+        """
+        return serialize(data, max_length=get_max_text_length(), max_items=get_max_items_length())
 
     @field_serializer("artifacts")
     def serialize_artifacts(self, data) -> dict:
-        return truncate_long_strings(data)
+        """Serializes the artifacts field, applying limits on text length and item count.
+
+        Returns:
+            dict: The serialized artifacts dictionary with enforced size constraints.
+        """
+        return serialize(data, max_length=get_max_text_length(), max_items=get_max_items_length())
 
     @field_serializer("params")
     def serialize_params(self, data) -> str:
-        return truncate_long_strings(data)
+        """Serialize the `params` field to a string with enforced limits on text length and item count.
+
+        Returns:
+            str: The serialized representation of the `params` data.
+        """
+        return serialize(data, max_length=get_max_text_length(), max_items=get_max_items_length())
 
 
 class VertexBuildTable(VertexBuildBase, table=True):  # type: ignore[call-arg]
     __tablename__ = "vertex_build"
     build_id: UUID | None = Field(default_factory=uuid4, primary_key=True)
-    flow: "Flow" = Relationship(back_populates="vertex_builds")
 
 
 class VertexBuildMapModel(BaseModel):

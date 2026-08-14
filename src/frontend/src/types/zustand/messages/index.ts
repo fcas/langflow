@@ -1,5 +1,4 @@
-import { ColDef, ColGroupDef } from "ag-grid-community";
-import { Message } from "../../messages";
+import type { Message } from "../../messages";
 
 export type MessagesStoreType = {
   messages: Message[];
@@ -12,5 +11,6 @@ export type MessagesStoreType = {
   clearMessages: () => void;
   removeMessages: (ids: string[]) => void;
   deleteSession: (id: string) => void;
+  renameSession: (oldSessionId: string, newSessionId: string) => void;
   displayLoadingMessage: boolean;
 };

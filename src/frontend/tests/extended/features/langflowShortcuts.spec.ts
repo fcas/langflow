@@ -1,37 +1,31 @@
-import { expect, Page, test } from "@playwright/test";
+import { expect, test } from "../../fixtures";
 import { adjustScreenView } from "../../utils/adjust-screen-view";
-import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { openBlankFlow } from "../../utils/flow/open-blank-flow";
 
 test(
   "LangflowShortcuts",
   { tag: ["@release", "@workspace"] },
   async ({ page }) => {
-    await awaitBootstrapTest(page);
-
-    await page.waitForSelector('[data-testid="blank-flow"]', {
-      timeout: 30000,
-    });
-    await page.getByTestId("blank-flow").click();
+    await openBlankFlow(page);
 
     await page.getByTestId("sidebar-search-input").click();
     await page.getByTestId("sidebar-search-input").fill("ollama");
 
-    await page.waitForSelector('[data-testid="modelsOllama"]', {
+    await page.waitForSelector('[data-testid="ollamaOllama"]', {
       timeout: 3000,
     });
 
     await page
-      .getByTestId("modelsOllama")
+      .getByTestId("ollamaOllama")
       .dragTo(page.locator('//*[@id="react-flow-id"]'));
     await page.mouse.up();
     await page.mouse.down();
 
-    await page.locator('//*[@id="react-flow-id"]/div/div[2]/button[3]').click();
-
     await adjustScreenView(page);
+    await adjustScreenView(page, { numberOfZoomOut: 2 });
+
     await page.getByTestId("generic-node-title-arrangement").click();
-    await page.keyboard.press(`ControlOrMeta+Shift+A`);
-    await page.getByText("Close").last().click();
+    await expect(page.getByTestId("parameters-button")).toBeVisible();
 
     await page.getByTestId("generic-node-title-arrangement").click();
     await page.keyboard.press(`ControlOrMeta+d`);

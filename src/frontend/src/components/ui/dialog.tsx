@@ -1,12 +1,22 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Cross2Icon } from "@radix-ui/react-icons";
 import * as React from "react";
+import DialogContentWithouFixed from "@/customization/components/custom-dialog-content-without-fixed";
+import { dialogClass } from "@/customization/utils/dialog-class";
 import { cn } from "../../utils/utils";
 import ShadTooltip from "../common/shadTooltipComponent";
+import { useClosedTriggerAriaControls } from "./use-closed-trigger-aria-controls";
+import { useInertForAriaHiddenElements } from "./use-inert-for-aria-hidden";
 
 const Dialog = DialogPrimitive.Root;
 
-const DialogTrigger = DialogPrimitive.Trigger;
+const DialogTrigger = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Trigger>
+>((props, ref) => (
+  <DialogPrimitive.Trigger ref={useClosedTriggerAriaControls(ref)} {...props} />
+));
+DialogTrigger.displayName = DialogPrimitive.Trigger.displayName;
 
 const DialogPortal = ({
   children,
@@ -26,45 +36,135 @@ const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn(
-      "nopan nodelete nodrag noflow fixed inset-0 bottom-0 left-0 right-0 top-0 z-40 overflow-auto bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className,
-    )}
+    className={cn(dialogClass.dialogContent, className)}
     {...props}
   />
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+const MAX_DIALOG_CHILD_SCAN_DEPTH = 4;
+
+const hasChildOfType = (
+  children: React.ReactNode,
+  targetType: React.ElementType,
+  depth = 0,
+): boolean =>
+  React.Children.toArray(children).some((child) => {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(child)) {
+      return false;
+    }
+    if (child.type === targetType) {
+      return true;
+    }
+    if (depth >= MAX_DIALOG_CHILD_SCAN_DEPTH) {
+      return false;
+    }
+    return hasChildOfType(child.props.children, targetType, depth + 1);
+  });
+
+// Create a VisuallyHidden component for accessibility
+const VisuallyHidden = React.forwardRef<
+  HTMLSpanElement,
+  React.HTMLAttributes<HTMLSpanElement>
+>(({ children, ...props }, ref) => (
+  <span
+    ref={ref}
+    className="absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0"
+    style={{ clip: "rect(0 0 0 0)", clipPath: "inset(50%)" }}
+    {...props}
+  >
+    {children}
+  </span>
+));
+VisuallyHidden.displayName = "VisuallyHidden";
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed z-50 flex w-full max-w-lg flex-col gap-4 rounded-xl border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <ShadTooltip
-        styleClasses="z-50"
-        content="Close"
-        side="bottom"
-        avoidCollisions
-      >
-        <DialogPrimitive.Close className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-sm ring-offset-background transition-opacity hover:bg-secondary-hover hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-          <Cross2Icon className="h-[18px] w-[18px]" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      </ShadTooltip>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
-DialogContent.displayName = DialogPrimitive.Content.displayName;
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    hideTitle?: boolean;
+    hideDescription?: boolean;
+    hideCloseButton?: boolean;
+    closeButtonClassName?: string;
+    overlayClassName?: string;
+  }
+>(
+  (
+    {
+      className,
+      children,
+      hideTitle = false,
+      hideDescription = false,
+      hideCloseButton = false,
+      closeButtonClassName,
+      overlayClassName,
+      onOpenAutoFocus,
+      ...props
+    },
+    ref,
+  ) => {
+    // Check if DialogTitle is included in children
+    const hasDialogTitle = hideTitle || hasChildOfType(children, DialogTitle);
+    const hasDialogDescription =
+      hideDescription || hasChildOfType(children, DialogDescription);
+
+    useInertForAriaHiddenElements();
+
+    return (
+      <DialogPortal>
+        <DialogOverlay className={overlayClassName} />
+        <DialogPrimitive.Content
+          ref={ref}
+          className={cn(
+            "fixed z-50 flex w-full max-w-lg flex-col gap-4 rounded-xl border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]",
+            className,
+          )}
+          onOpenAutoFocus={(e) => {
+            if (onOpenAutoFocus) {
+              onOpenAutoFocus(e);
+              return;
+            }
+            // Focus must enter the dialog on open (WCAG 2.4.3), but not
+            // land on the close button — that would pop its tooltip.
+            // Focus the dialog container itself instead.
+            e.preventDefault();
+            (e.target as HTMLElement | null)?.focus();
+          }}
+          {...props}
+        >
+          {!hasDialogTitle && (
+            <VisuallyHidden>
+              <DialogTitle>Dialog</DialogTitle>
+            </VisuallyHidden>
+          )}
+          {!hasDialogDescription && (
+            <VisuallyHidden>
+              <DialogDescription />
+            </VisuallyHidden>
+          )}
+          {children}
+          {!hideCloseButton && (
+            <ShadTooltip
+              styleClasses="z-50"
+              content="Close"
+              side="bottom"
+              avoidCollisions
+            >
+              <DialogPrimitive.Close
+                className={cn(
+                  "absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-sm ring-offset-background transition-opacity hover:bg-secondary-hover hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground",
+                  closeButtonClassName,
+                )}
+              >
+                <Cross2Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                <span className="sr-only">Close</span>
+              </DialogPrimitive.Close>
+            </ShadTooltip>
+          )}
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    );
+  },
+);
 
 const DialogHeader = ({
   className,
@@ -121,9 +221,11 @@ DialogDescription.displayName = DialogPrimitive.Description.displayName;
 export {
   Dialog,
   DialogContent,
+  DialogContentWithouFixed,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  VisuallyHidden,
 };

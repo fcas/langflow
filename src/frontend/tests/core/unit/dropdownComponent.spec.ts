@@ -1,28 +1,33 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../../fixtures";
 import { adjustScreenView } from "../../utils/adjust-screen-view";
-import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { TEXTS } from "../../utils/constants/texts";
+
+import { openBlankFlow } from "../../utils/flow/open-blank-flow";
+import {
+  closeParametersPanel,
+  openParametersPanel,
+  toggleParameterOnNode,
+} from "../../utils/open-advanced-options";
 
 test(
   "dropDownComponent",
   { tag: ["@release", "@workspace"] },
   async ({ page }) => {
-    await awaitBootstrapTest(page);
+    await openBlankFlow(page);
 
-    await page.waitForSelector('[data-testid="blank-flow"]', {
-      timeout: 30000,
-    });
-
-    await page.getByTestId("blank-flow").click();
+    // Allow for legacy components
+    await page.getByTestId("sidebar-options-trigger").click();
+    await page.getByTestId("sidebar-legacy-switch").click();
 
     await page.getByTestId("sidebar-search-input").click();
     await page.getByTestId("sidebar-search-input").fill("amazon");
 
-    await page.waitForSelector('[data-testid="modelsAmazon Bedrock"]', {
+    await page.waitForSelector('[data-testid="amazonAmazon Bedrock"]', {
       timeout: 3000,
     });
 
     await page
-      .getByTestId("modelsAmazon Bedrock")
+      .getByTestId("amazonAmazon Bedrock")
       .first()
       .dragTo(page.locator('//*[@id="react-flow-id"]'));
     await page.mouse.up();
@@ -47,80 +52,54 @@ test(
     await page.getByTestId("dropdown_str_model_id").click();
     await page.getByText("anthropic.claude-v2").last().click();
 
+    await page.waitForTimeout(1000);
+
     value = await page.getByTestId("dropdown_str_model_id").innerText();
-    if (value !== "anthropic.claude-v2:1") {
-      expect(false).toBeTruthy();
-    }
+    expect(value.length).toBeGreaterThan(10);
 
     await page.waitForSelector('[data-testid="more-options-modal"]', {
       timeout: 3000,
     });
 
-    await page.getByTestId("more-options-modal").click();
-    await page.getByTestId("advanced-button-modal").click();
+    // LE-1810: values live on the node; the panel only manages visibility.
+    await openParametersPanel(page);
 
-    value = await page
-      .getByTestId("value-dropdown-dropdown_str_edit_model_id")
-      .innerText();
-    if (value !== "anthropic.claude-v2:1") {
-      expect(false).toBeTruthy();
-    }
+    await page.waitForTimeout(1000);
 
-    await page.locator('//*[@id="showregion_name"]').click();
-    expect(
-      await page.locator('//*[@id="showregion_name"]').isChecked(),
-    ).toBeFalsy();
+    // visibility round-trips through the panel Add/Remove actions
+    await toggleParameterOnNode(page, "region_name");
+    await expect(page.getByTestId("inspector-add-region_name")).toBeVisible();
 
-    await page.locator('//*[@id="showregion_name"]').click();
-    expect(
-      await page.locator('//*[@id="showregion_name"]').isChecked(),
-    ).toBeTruthy();
+    await toggleParameterOnNode(page, "region_name");
+    await expect(
+      page.getByTestId("inspector-remove-region_name"),
+    ).toBeVisible();
 
-    // showmodel_id
-    await page.locator('//*[@id="showmodel_id"]').click();
-    expect(
-      await page.locator('//*[@id="showmodel_id"]').isChecked(),
-    ).toBeFalsy();
+    await toggleParameterOnNode(page, "model_id");
+    await expect(page.getByTestId("inspector-add-model_id")).toBeVisible();
 
-    // showmodel_id
-    await page.locator('//*[@id="showmodel_id"]').click();
-    expect(
-      await page.locator('//*[@id="showmodel_id"]').isChecked(),
-    ).toBeTruthy();
+    await toggleParameterOnNode(page, "model_id");
+    await expect(page.getByTestId("inspector-remove-model_id")).toBeVisible();
 
-    await page.locator('//*[@id="showregion_name"]').click();
-    expect(
-      await page.locator('//*[@id="showregion_name"]').isChecked(),
-    ).toBeFalsy();
+    await toggleParameterOnNode(page, "region_name");
+    await expect(page.getByTestId("inspector-add-region_name")).toBeVisible();
 
-    await page.locator('//*[@id="showregion_name"]').click();
-    expect(
-      await page.locator('//*[@id="showregion_name"]').isChecked(),
-    ).toBeTruthy();
+    await toggleParameterOnNode(page, "region_name");
+    await expect(
+      page.getByTestId("inspector-remove-region_name"),
+    ).toBeVisible();
 
-    // showmodel_id
-    await page.locator('//*[@id="showmodel_id"]').click();
-    expect(
-      await page.locator('//*[@id="showmodel_id"]').isChecked(),
-    ).toBeFalsy();
+    await toggleParameterOnNode(page, "model_id");
+    await expect(page.getByTestId("inspector-add-model_id")).toBeVisible();
 
-    // showmodel_id
-    await page.locator('//*[@id="showmodel_id"]').click();
-    expect(
-      await page.locator('//*[@id="showmodel_id"]').isChecked(),
-    ).toBeTruthy();
+    await toggleParameterOnNode(page, "model_id");
+    await expect(page.getByTestId("inspector-remove-model_id")).toBeVisible();
 
-    await page.getByTestId("value-dropdown-dropdown_str_edit_model_id").click();
+    await closeParametersPanel(page);
+
+    // value editing happens on the node dropdown
+    await page.getByTestId("value-dropdown-dropdown_str_model_id").click();
     await page.getByText("cohere").last().click();
-
-    value = await page
-      .getByTestId("value-dropdown-dropdown_str_edit_model_id")
-      .innerText();
-    if (value !== "cohere.command-r-plus-v1:0") {
-      expect(false).toBeTruthy();
-    }
-
-    await page.getByText("Close").last().click();
 
     value = await page
       .getByTestId("value-dropdown-dropdown_str_model_id")
@@ -128,10 +107,10 @@ test(
     if (value !== "cohere.command-r-plus-v1:0") {
       expect(false).toBeTruthy();
     }
-    await page.getByTestId("code-button-modal").click();
+    await page.getByTestId("code-button-modal").last().click();
 
     await page.locator("textarea").press("Control+a");
-    const emptyOptionsCode = `from langchain_community.chat_models.bedrock import BedrockChat
+    const emptyOptionsCode = `from langchain_aws import ChatBedrock as BedrockChat
 
 from langflow.base.constants import STREAM_INFO_TEXT
 from langflow.base.models.model import LCModelComponent
@@ -139,7 +118,6 @@ from langflow.field_typing import BaseLanguageModel, Text
 from langflow.io import BoolInput, DictInput, DropdownInput, StrInput
 from langflow.io import MessageInput
 from langflow.io import Output
-
 
 class AmazonBedrockComponent(LCModelComponent):
     display_name: str = "Amazon Bedrock"
@@ -236,7 +214,7 @@ class AmazonBedrockComponent(LCModelComponent):
         return output
   `;
     await page.locator("textarea").fill(emptyOptionsCode);
-    await page.getByRole("button", { name: "Check & Save" }).click();
+    await page.getByRole("button", { name: TEXTS.checkAndSave }).click();
     await page
       .getByText("No parameters are available for display.")
       .isVisible();

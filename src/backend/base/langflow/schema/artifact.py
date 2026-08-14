@@ -2,14 +2,14 @@ from collections.abc import Generator
 from enum import Enum
 
 from fastapi.encoders import jsonable_encoder
-from loguru import logger
+from lfx.log.logger import logger
 from pydantic import BaseModel
 
 from langflow.schema.data import Data
 from langflow.schema.dataframe import DataFrame
 from langflow.schema.encoders import CUSTOM_ENCODERS
 from langflow.schema.message import Message
-from langflow.schema.serialize import recursive_serialize_or_str
+from langflow.serialization.serialization import serialize
 
 
 class ArtifactType(str, Enum):
@@ -56,13 +56,15 @@ def _to_list_of_dicts(raw):
     raw_ = []
     for item in raw:
         if hasattr(item, "dict") or hasattr(item, "model_dump"):
-            raw_.append(recursive_serialize_or_str(item))
+            raw_.append(serialize(item))
         else:
             raw_.append(str(item))
     return raw_
 
 
 def post_process_raw(raw, artifact_type: str):
+    default_message = "Built Successfully ✨"
+
     if artifact_type == ArtifactType.STREAM.value:
         raw = ""
     elif artifact_type == ArtifactType.ARRAY.value:
@@ -73,8 +75,8 @@ def post_process_raw(raw, artifact_type: str):
                 raw = jsonable_encoder(raw, custom_encoder=CUSTOM_ENCODERS)
                 artifact_type = ArtifactType.OBJECT.value
             except Exception:  # noqa: BLE001
-                logger.opt(exception=True).debug(f"Error converting to json: {raw} ({type(raw)})")
-                raw = "Built Successfully ✨"
+                logger.debug(f"Error converting to json: {raw} ({type(raw)})", exc_info=True)
+                raw = default_message
         else:
-            raw = "Built Successfully ✨"
+            raw = default_message
     return raw, artifact_type

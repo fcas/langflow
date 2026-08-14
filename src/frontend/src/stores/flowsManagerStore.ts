@@ -1,11 +1,12 @@
-import { SAVE_DEBOUNCE_TIME } from "@/constants/constants";
 import { cloneDeep } from "lodash";
 import { create } from "zustand";
-import { FlowType } from "../types/flow";
-import {
+import { SAVE_DEBOUNCE_TIME } from "@/constants/constants";
+import type { FlowType } from "../types/flow";
+import type {
   FlowsManagerStoreType,
   UseUndoRedoOptions,
 } from "../types/zustand/flowsManager";
+import useAssistantManagerStore from "./assistantManagerStore";
 import useFlowStore from "./flowStore";
 
 const defaultOptions: UseUndoRedoOptions = {
@@ -40,6 +41,8 @@ const useFlowsManagerStore = create<FlowsManagerStoreType>((set, get) => ({
       currentFlowId: flow?.id ?? "",
     });
     useFlowStore.getState().resetFlow(flow);
+    // Close assistant when changing flows
+    useAssistantManagerStore.getState().setAssistantSidebarOpen(false);
   },
   getFlowById: (id: string) => {
     return get().flows?.find((flow) => flow.id === id);
@@ -130,11 +133,13 @@ const useFlowsManagerStore = create<FlowsManagerStoreType>((set, get) => ({
   setSelectedFlowsComponentsCards: (selectedFlowsComponentsCards: string[]) => {
     set({ selectedFlowsComponentsCards });
   },
-  flowToCanvas: null,
-  setFlowToCanvas: async (flowToCanvas: FlowType | null) => {
-    await new Promise<void>((resolve) => {
-      set({ flowToCanvas });
-      resolve();
+  resetStore: () => {
+    set({
+      flows: undefined,
+      currentFlow: undefined,
+      currentFlowId: "",
+      searchFlowsComponents: "",
+      selectedFlowsComponentsCards: [],
     });
   },
 }));

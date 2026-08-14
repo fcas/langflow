@@ -1,19 +1,19 @@
 import { uniqueId } from "lodash";
 import { useContext, useEffect, useState } from "react";
-import IconComponent from "../../components/common/genericIconComponent";
-import PageLayout from "../../components/common/pageLayout";
-import ShadTooltip from "../../components/common/shadTooltipComponent";
-import { SkeletonCardComponent } from "../../components/common/skeletonCardComponent";
-import { Button } from "../../components/ui/button";
-
+import { useTranslation } from "react-i18next";
+import { useParams } from "react-router-dom";
 import PaginatorComponent from "@/components/common/paginatorComponent";
 import StoreCardComponent from "@/components/common/storeCardComponent";
 import { CustomLink } from "@/customization/components/custom-link";
 import { useCustomNavigate } from "@/customization/hooks/use-custom-navigate";
 import { useUtilityStore } from "@/stores/utilityStore";
-import { useParams } from "react-router-dom";
+import IconComponent from "../../components/common/genericIconComponent";
+import PageLayout from "../../components/common/pageLayout";
+import ShadTooltip from "../../components/common/shadTooltipComponent";
+import { SkeletonCardComponent } from "../../components/common/skeletonCardComponent";
 import { TagsSelector } from "../../components/common/tagsSelectorComponent";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import {
   Select,
   SelectContent,
@@ -23,26 +23,18 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import {
-  APIKEY_ERROR_ALERT,
-  COMPONENTS_ERROR_ALERT,
-  INVALID_API_ERROR_ALERT,
-  NOAPI_ERROR_ALERT,
-} from "../../constants/alerts_constants";
-import {
-  STORE_DESC,
   STORE_PAGINATION_PAGE,
   STORE_PAGINATION_ROWS_COUNT,
   STORE_PAGINATION_SIZE,
-  STORE_TITLE,
 } from "../../constants/constants";
 import { AuthContext } from "../../contexts/authContext";
 import { getStoreComponents } from "../../controllers/API";
 import useAlertStore from "../../stores/alertStore";
 import useFlowsManagerStore from "../../stores/flowsManagerStore";
 import { useStoreStore } from "../../stores/storeStore";
-import { storeComponent } from "../../types/store";
+import type { storeComponent } from "../../types/store";
 import { cn } from "../../utils/utils";
-import InputSearchComponent from "../MainPage/oldComponents/myCollectionComponent/components/inputSearchComponent";
+import InputSearchComponent from "../MainPage/components/inputSearchComponent";
 
 export default function StorePage(): JSX.Element {
   const hasApiKey = useStoreStore((state) => state.hasApiKey);
@@ -53,6 +45,7 @@ export default function StorePage(): JSX.Element {
 
   const { apiKey } = useContext(AuthContext);
 
+  const { t } = useTranslation();
   const setErrorData = useAlertStore((state) => state.setErrorData);
   const currentFlowId = useFlowsManagerStore((state) => state.currentFlowId);
   const [loading, setLoading] = useState(true);
@@ -76,14 +69,14 @@ export default function StorePage(): JSX.Element {
     if (!loadingApiKey) {
       if (!hasApiKey) {
         setErrorData({
-          title: APIKEY_ERROR_ALERT,
-          list: [NOAPI_ERROR_ALERT],
+          title: t("errors.apiKey"),
+          list: [t("errors.noApiKey")],
         });
         setLoading(false);
       } else if (!validApiKey) {
         setErrorData({
-          title: APIKEY_ERROR_ALERT,
-          list: [INVALID_API_ERROR_ALERT],
+          title: t("errors.apiKey"),
+          list: [t("errors.invalidApiKey")],
         });
       }
     }
@@ -147,8 +140,8 @@ export default function StorePage(): JSX.Element {
           setTotalRowsCount(0);
           setLoading(false);
           setErrorData({
-            title: COMPONENTS_ERROR_ALERT,
-            list: [err["response"]["data"]["detail"]],
+            title: t("errors.getComponents"),
+            list: [err?.response?.data?.detail ?? t("store.fetchErrorDetail")],
           });
         }
       });
@@ -162,8 +155,8 @@ export default function StorePage(): JSX.Element {
   return (
     <PageLayout
       betaIcon
-      title={STORE_TITLE}
-      description={STORE_DESC}
+      title={t("store.title")}
+      description={t("store.description")}
       button={
         <Button
           data-testid="api-key-button-store"
@@ -178,7 +171,7 @@ export default function StorePage(): JSX.Element {
           }}
         >
           <IconComponent name="Key" className="mr-2 w-4" />
-          API Key
+          {t("store.apiKeyButton")}
         </Button>
       }
     >
@@ -213,7 +206,7 @@ export default function StorePage(): JSX.Element {
                   (loading ? " cursor-not-allowed" : "")
                 }
               >
-                All
+                {t("store.tabAll")}
               </button>
               <button
                 data-testid="flows-button-store"
@@ -229,7 +222,7 @@ export default function StorePage(): JSX.Element {
                   (loading ? " cursor-not-allowed" : "")
                 }
               >
-                Flows
+                {t("store.tabFlows")}
               </button>
               <button
                 data-testid="components-button-store"
@@ -245,11 +238,11 @@ export default function StorePage(): JSX.Element {
                   (loading ? " cursor-not-allowed" : "")
                 }
               >
-                Components
+                {t("store.tabComponents")}
               </button>
-              <ShadTooltip content="Coming Soon">
+              <ShadTooltip content={t("store.comingSoon")}>
                 <button className="cursor-not-allowed p-3 text-muted-foreground">
-                  Bundles
+                  {t("store.tabBundles")}
                 </button>
               </ShadTooltip>
             </div>
@@ -262,22 +255,22 @@ export default function StorePage(): JSX.Element {
               value={selectFilter}
             >
               <SelectTrigger className="mr-4 w-[160px] flex-shrink-0">
-                <SelectValue placeholder="Filter Values" />
+                <SelectValue placeholder={t("store.filterValues")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="all">{t("store.filterAll")}</SelectItem>
                   <SelectItem
                     disabled={!hasApiKey || !validApiKey}
                     value="createdbyme"
                   >
-                    Created By Me
+                    {t("store.filterCreatedByMe")}
                   </SelectItem>
                   <SelectItem
                     disabled={!hasApiKey || !validApiKey}
                     value="likedbyme"
                   >
-                    Liked By Me
+                    {t("store.filterLikedByMe")}
                   </SelectItem>
                 </SelectGroup>
               </SelectContent>
@@ -308,7 +301,8 @@ export default function StorePage(): JSX.Element {
             <span className="px-0.5 text-sm text-muted-foreground">
               {(!loading || searchData.length !== 0) && (
                 <>
-                  {totalRowsCount} {totalRowsCount !== 1 ? "results" : "result"}
+                  {totalRowsCount}{" "}
+                  {t("store.results", { count: totalRowsCount })}
                 </>
               )}
             </span>
@@ -320,12 +314,16 @@ export default function StorePage(): JSX.Element {
               }}
             >
               <SelectTrigger data-testid="select-order-store">
-                <SelectValue placeholder="Popular" />
+                <SelectValue placeholder={t("store.sortPopular")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Popular">Popular</SelectItem>
+                <SelectItem value="Popular">
+                  {t("store.sortPopular")}
+                </SelectItem>
                 {/* <SelectItem value="Recent">Most Recent</SelectItem> */}
-                <SelectItem value="Alphabetical">Alphabetical</SelectItem>
+                <SelectItem value="Alphabetical">
+                  {t("store.sortAlphabetical")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -360,15 +358,21 @@ export default function StorePage(): JSX.Element {
                   <div className="grid w-full gap-4">
                     {selectFilter != "all" ? (
                       <>
-                        You haven't{" "}
-                        {selectFilter === "createdbyme" ? "created" : "liked"}{" "}
-                        anything with the selected filters yet.
+                        {t("store.emptyCreatedOrLiked", {
+                          action:
+                            selectFilter === "createdbyme"
+                              ? t("store.emptyCreatedAction")
+                              : t("store.emptyLikedAction"),
+                        })}
                       </>
                     ) : (
                       <>
-                        There are no{" "}
-                        {tabActive == "Flows" ? "Flows" : "Components"} with the
-                        selected filters.
+                        {t("store.emptyNoItems", {
+                          type:
+                            tabActive == "Flows"
+                              ? t("store.tabFlows")
+                              : t("store.tabComponents"),
+                        })}
                       </>
                     )}
                   </div>

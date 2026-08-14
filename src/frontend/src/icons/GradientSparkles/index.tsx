@@ -21,22 +21,6 @@ export const GradientInfinity = forwardRef<
   );
 });
 
-export const GradientSave = forwardRef<
-  SVGSVGElement,
-  React.PropsWithChildren<{}>
->((props, ref) => {
-  return (
-    <>
-      <ForwardedIconComponent
-        name="Save"
-        stroke="url(#x-gradient)"
-        ref={ref}
-        {...props}
-      />
-    </>
-  );
-});
-
 export const GradientGroup = (props) => {
   return (
     <>
@@ -57,7 +41,10 @@ export const GradientGroup = (props) => {
   );
 };
 
-export const GradientUngroup = (props) => {
+export const GradientUngroup = forwardRef<
+  SVGSVGElement,
+  React.PropsWithChildren<{}>
+>((props, ref) => {
   return (
     <>
       <svg width="0" height="0" style={{ position: "absolute" }}>
@@ -68,7 +55,12 @@ export const GradientUngroup = (props) => {
           </linearGradient>
         </defs>
       </svg>
-      <ForwardedIconComponent name="Ungroup" stroke="url(#grad4)" {...props} />
+      <ForwardedIconComponent
+        name="Ungroup"
+        stroke="url(#grad4)"
+        ref={ref}
+        {...props}
+      />
     </>
   );
-};
+});

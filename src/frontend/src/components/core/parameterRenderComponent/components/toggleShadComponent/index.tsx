@@ -1,5 +1,6 @@
 import { Switch } from "../../../../ui/switch";
-import { InputProps, ToggleComponentType } from "../../types";
+import { getNodeScopedDomId } from "../../helpers/get-node-scoped-dom-id";
+import type { InputProps, ToggleComponentType } from "../../types";
 
 export default function ToggleShadComponent({
   value,
@@ -9,7 +10,9 @@ export default function ToggleShadComponent({
   size,
   showToogle,
   id,
-}: InputProps<boolean, ToggleComponentType>): JSX.Element {
+  nodeId,
+  showParameter = true,
+}: InputProps<boolean, ToggleComponentType>): JSX.Element | null {
   let scaleX, scaleY;
   switch (size) {
     case "small":
@@ -35,10 +38,14 @@ export default function ToggleShadComponent({
       break;
   }
 
+  if (!showParameter) {
+    return null;
+  }
+
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <Switch
-        id={id}
+        id={getNodeScopedDomId(id, nodeId)}
         data-testid={id}
         style={{
           transform: `scaleX(${scaleX}) scaleY(${scaleY})`,

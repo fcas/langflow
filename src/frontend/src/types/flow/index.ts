@@ -1,6 +1,6 @@
-import { Edge, Node, ReactFlowJsonObject } from "@xyflow/react";
-import { BuildStatus } from "../../constants/enums";
-import { APIClassType } from "../api/index";
+import type { Edge, Node, ReactFlowJsonObject } from "@xyflow/react";
+import type { BuildStatus } from "../../constants/enums";
+import type { APIClassType, OutputFieldType } from "../api/index";
 
 export type PaginatedFlowsType = {
   items: FlowType[];
@@ -31,6 +31,21 @@ export type FlowType = {
   folder_id?: string;
   webhook?: boolean;
   locked?: boolean | null;
+  public?: boolean;
+  access_type?: "PUBLIC" | "PRIVATE" | "PROTECTED";
+  mcp_enabled?: boolean;
+  flow_type?: "workflow" | "agent";
+  a2a_enabled?: boolean;
+  a2a_card_overrides?: A2ACardOverrides | null;
+  name_key?: string | null;
+};
+
+export type A2ACardOverrides = {
+  name?: string;
+  description?: string;
+  version?: string;
+  tags?: string[];
+  examples?: string[];
 };
 
 export type GenericNodeType = Node<NodeDataType, "genericNode">;
@@ -46,8 +61,11 @@ export type noteClassType = Pick<
 > & {
   template: {
     backgroundColor?: string;
+    // biome-ignore lint/suspicious/noExplicitAny: legacy
     [key: string]: any;
   };
+  outputs?: OutputFieldType[];
+  i18n_key?: string;
 };
 
 export type NoteDataType = {
@@ -64,6 +82,9 @@ export type NodeDataType = {
   output_types?: string[];
   selected_output_type?: string;
   buildStatus?: BuildStatus;
+  selected_output?: string;
+  /** Transient flag: true while "Connect other models" mode is active */
+  _connectionMode?: boolean;
 };
 
 export type EdgeType = Edge<EdgeDataType, "default">;
@@ -101,8 +122,10 @@ export type sourceHandleType = {
 //left side
 export type targetHandleType = {
   inputTypes?: string[];
+  output_types?: string[];
   type: string;
   fieldName: string;
+  name?: string;
   id: string;
   proxy?: { field: string; id: string };
 };

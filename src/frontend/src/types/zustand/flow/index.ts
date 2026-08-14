@@ -1,5 +1,5 @@
-import { AllNodeType, EdgeType, FlowType } from "@/types/flow";
-import {
+// biome-ignore-all lint/suspicious/noExplicitAny: pre-existing legacy flow-store types predate this rule; the HITL change only added typed fields
+import type {
   Connection,
   Node,
   OnEdgesChange,
@@ -7,10 +7,11 @@ import {
   ReactFlowInstance,
   Viewport,
 } from "@xyflow/react";
-import { BuildStatus } from "../../../constants/enums";
-import { VertexBuildTypeAPI } from "../../api";
-import { ChatInputType, ChatOutputType } from "../../chat";
-import { FlowState } from "../../tabs";
+import type { AllNodeType, EdgeType, FlowType } from "@/types/flow";
+import type { BuildStatus, EventDeliveryType } from "../../../constants/enums";
+import type { LogsLogType, VertexBuildTypeAPI } from "../../api";
+import type { ChatInputType, ChatOutputType } from "../../chat";
+import type { FlowState } from "../../tabs";
 
 export type FlowPoolObjectType = {
   timestamp: string;
@@ -52,12 +53,35 @@ export type FlowPoolType = {
   [key: string]: Array<VertexBuildTypeAPI>;
 };
 
+export type ComponentsToUpdateType = {
+  id: string;
+  icon?: string;
+  display_name: string;
+  outdated: boolean;
+  blocked: boolean;
+  breakingChange: boolean;
+  userEdited: boolean;
+};
+
 export type FlowStoreType = {
+  dismissedNodes: string[];
+  addDismissedNodes: (dismissedNodes: string[]) => void;
+  removeDismissedNodes: (dismissedNodes: string[]) => void;
+  dismissedNodesLegacy: string[];
+  addDismissedNodesLegacy: (dismissedNodes: string[]) => void;
+  //key x, y
+  positionDictionary: { [key: number]: number };
+  isPositionAvailable: (position: { x: number; y: number }) => boolean;
+  setPositionDictionary: (positionDictionary: {
+    [key: number]: number;
+  }) => void;
   fitViewNode: (nodeId: string) => void;
-  autoSaveFlow: (() => void) | undefined;
-  componentsToUpdate: string[];
+  autoSaveFlow: ((flow?: FlowType) => void) | undefined;
+  componentsToUpdate: ComponentsToUpdateType[];
   setComponentsToUpdate: (
-    update: string[] | ((oldState: string[]) => string[]),
+    update:
+      | ComponentsToUpdateType[]
+      | ((oldState: ComponentsToUpdateType[]) => ComponentsToUpdateType[]),
   ) => void;
   updateComponentsToUpdate: (nodes: AllNodeType[]) => void;
   onFlowPage: boolean;
@@ -83,12 +107,27 @@ export type FlowStoreType = {
   hasIO: boolean;
   setFlowPool: (flowPool: FlowPoolType) => void;
   addDataToFlowPool: (data: VertexBuildTypeAPI, nodeId: string) => void;
+  appendLogToFlowPool: (
+    nodeId: string,
+    outputName: string,
+    log: LogsLogType,
+  ) => void;
   CleanFlowPool: () => void;
   isBuilding: boolean;
+  buildStartTime: number | null;
+  buildDuration: number | null;
+  buildingFlowId: string | null;
+  buildingSessionId: string | null;
   isPending: boolean;
+  awaitingInput: boolean;
   setIsBuilding: (isBuilding: boolean) => void;
+  setAwaitingInput: (awaitingInput: boolean) => void;
+  setBuildStartTime: (time: number) => void;
+  setBuildDuration: (duration: number) => void;
+  setBuildingSession: (flowId: string | null, sessionId: string | null) => void;
   setPending: (isPending: boolean) => void;
   resetFlow: (flow: FlowType | undefined) => void;
+  resetFlowState: () => void;
   reactFlowInstance: ReactFlowInstance<AllNodeType, EdgeType> | null;
   setReactFlowInstance: (
     newState: ReactFlowInstance<AllNodeType, EdgeType>,
@@ -131,24 +170,46 @@ export type FlowStoreType = {
   cleanFlow: () => void;
   setFilterEdge: (newState) => void;
   getFilterEdge: any[];
+  setFilterComponent: (newState) => void;
+  getFilterComponent: string;
+  rightClickedNodeId: string | null;
+  setRightClickedNodeId: (nodeId: string | null) => void;
   onConnect: (connection: Connection) => void;
   unselectAll: () => void;
-  buildFlow: ({
-    startNodeId,
-    stopNodeId,
-    input_value,
-    files,
-    silent,
-    setLockChat,
-    session,
-  }: {
-    setLockChat?: (lock: boolean) => void;
+  playgroundPage: boolean;
+  setPlaygroundPage: (playgroundPage: boolean) => void;
+  buildInfo: { error?: string[]; success?: boolean } | null;
+  setBuildInfo: (
+    buildInfo: { error?: string[]; success?: boolean } | null,
+  ) => void;
+  pastBuildFlowParams: {
     startNodeId?: string;
     stopNodeId?: string;
     input_value?: string;
     files?: string[];
     silent?: boolean;
     session?: string;
+    stream?: boolean;
+    eventDelivery?: EventDeliveryType;
+  } | null;
+  buildFlow: ({
+    startNodeId,
+    stopNodeId,
+    input_value,
+    files,
+    silent,
+    session,
+    stream,
+    eventDelivery,
+  }: {
+    startNodeId?: string;
+    stopNodeId?: string;
+    input_value?: string;
+    files?: string[];
+    silent?: boolean;
+    session?: string;
+    stream?: boolean;
+    eventDelivery?: EventDeliveryType;
   }) => Promise<void>;
   getFlow: () => { nodes: Node[]; edges: EdgeType[]; viewport: Viewport };
   updateVerticesBuild: (
@@ -167,10 +228,13 @@ export type FlowStoreType = {
     runId?: string;
     verticesToRun: string[];
   } | null;
-  updateBuildStatus: (nodeId: string[], status: BuildStatus) => void;
+  updateBuildStatus: (nodeIdList: string[], status: BuildStatus) => void;
   revertBuiltStatusFromBuilding: () => void;
   flowBuildStatus: {
-    [key: string]: { status: BuildStatus; timestamp?: string };
+    [key: string]: {
+      status: BuildStatus;
+      timestamp?: string;
+    };
   };
   updateFlowPool: (
     nodeId: string,
@@ -178,8 +242,6 @@ export type FlowStoreType = {
     buildId?: string,
   ) => void;
   getNodePosition: (nodeId: string) => { x: number; y: number };
-  setLockChat: (lock: boolean) => void;
-  lockChat: boolean;
   updateFreezeStatus: (nodeIds: string[], freeze: boolean) => void;
   currentFlow: FlowType | undefined;
   setCurrentFlow: (flow: FlowType | undefined) => void;
@@ -244,5 +306,14 @@ export type FlowStoreType = {
   currentBuildingNodeId: string[] | undefined;
   setCurrentBuildingNodeId: (nodeIds: string[] | undefined) => void;
   clearEdgesRunningByNodes: () => Promise<void>;
+  clearAndSetEdgesRunning: (nextIds?: string[]) => void;
   updateToolMode: (nodeId: string, toolMode: boolean) => void;
+  helperLineEnabled: boolean;
+  setHelperLineEnabled: (helperLineEnabled: boolean) => void;
+  inspectionPanelVisible: boolean;
+  setInspectionPanelVisible: (visible: boolean) => void;
+  newChatOnPlayground: boolean;
+  setNewChatOnPlayground: (newChat: boolean) => void;
+  stopNodeId: string | undefined;
+  setStopNodeId: (nodeId: string | undefined) => void;
 };

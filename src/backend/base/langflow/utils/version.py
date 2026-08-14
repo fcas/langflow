@@ -3,8 +3,6 @@ from importlib import metadata
 import httpx
 from packaging import version as pkg_version
 
-from langflow.logging.logger import logger
-
 
 def _compute_non_prerelease_version(prerelease_version: str) -> str:
     prerelease_keywords = ["a", "b", "rc", "dev", "post"]
@@ -40,10 +38,17 @@ def _get_version_info():
         except (ImportError, metadata.PackageNotFoundError):
             pass
         else:
+            # The canonical `langflow` / `langflow-base` distribution matches first, and the
+            # nightly now publishes under that canonical name as a `.devN` pre-release. Derive the
+            # "Nightly" label from the `.dev` version marker (not the package name) so the startup
+            # banner and telemetry `package` field still identify nightlies correctly.
+            display = display_name
+            if "dev" in prerelease_version and "Nightly" not in display:
+                display = f"{display_name} Nightly"
             return {
                 "version": prerelease_version,
                 "main_version": version,
-                "package": display_name,
+                "package": display,
             }
 
     if __version__ is None:
@@ -86,7 +91,6 @@ def fetch_latest_version(package_name: str, *, include_prerelease: bool) -> str 
         return max(valid_versions, key=pkg_version.parse)
 
     except Exception:  # noqa: BLE001
-        logger.exception("Error fetching latest version")
         return None
 
 

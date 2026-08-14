@@ -1,30 +1,56 @@
+import Fuse from "fuse.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useParams } from "react-router-dom";
+import { ENABLE_KNOWLEDGE_BASES } from "@/customization/feature-flags";
 import { useCustomNavigate } from "@/customization/hooks/use-custom-navigate";
 import { track } from "@/customization/utils/analytics";
 import useAddFlow from "@/hooks/flows/use-add-flow";
+import useFlowBuilderWelcomeStore from "@/stores/flowBuilderWelcomeStore";
 import useFlowsManagerStore from "@/stores/flowsManagerStore";
-import Fuse from "fuse.js";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
 import { ForwardedIconComponent } from "../../../../components/common/genericIconComponent";
 import { Input } from "../../../../components/ui/input";
 import { useFolderStore } from "../../../../stores/foldersStore";
-import { TemplateContentProps } from "../../../../types/templates/types";
+import type { TemplateContentProps } from "../../../../types/templates/types";
 import { updateIds } from "../../../../utils/reactflowUtils";
 import { TemplateCategoryComponent } from "../TemplateCategoryComponent";
+
+interface TemplateContentComponentProps extends TemplateContentProps {
+  loading: boolean;
+  onFlowCreating: (loading: boolean) => void;
+}
 
 export default function TemplateContentComponent({
   currentTab,
   categories,
-}: TemplateContentProps) {
-  const examples = useFlowsManagerStore((state) => state.examples).filter(
-    (example) =>
-      example.tags?.includes(currentTab ?? "") ||
-      currentTab === "all-templates",
-  );
+  loading,
+  onFlowCreating,
+}: TemplateContentComponentProps) {
+  const { t } = useTranslation();
+  const allExamples = useFlowsManagerStore((state) => state.examples);
+
+  const examples = useMemo(() => {
+    return allExamples
+      .filter((example) => {
+        if (!ENABLE_KNOWLEDGE_BASES && example.name?.includes("Knowledge")) {
+          return false;
+        }
+        return true;
+      })
+      .filter(
+        (example) =>
+          example.tags?.includes(currentTab ?? "") ||
+          currentTab === "all-templates",
+      );
+  }, [allExamples, currentTab]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredExamples, setFilteredExamples] = useState(examples);
   const addFlow = useAddFlow();
   const navigate = useCustomNavigate();
+  const dismissWelcomeForNavigation = useFlowBuilderWelcomeStore(
+    (state) => state.dismissForNavigation,
+  );
   const { folderId } = useParams();
   const myCollectionId = useFolderStore((state) => state.myCollectionId);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -52,13 +78,21 @@ export default function TemplateContentComponent({
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
     }
-  }, [searchQuery, currentTab]);
+  }, [searchQuery, currentTab, examples, fuse]);
 
   const handleCardClick = (example) => {
+    if (loading) return;
+    onFlowCreating(true);
     updateIds(example.data);
-    addFlow({ flow: example }).then((id) => {
-      navigate(`/flow/${id}/folder/${folderIdUrl}`);
-    });
+    addFlow({ flow: example })
+      .then((id) => {
+        // Same tick as the navigate — see ``dismissForNavigation``.
+        dismissWelcomeForNavigation();
+        navigate(`/flow/${id}/folder/${folderIdUrl}`);
+      })
+      .finally(() => {
+        onFlowCreating(false);
+      });
     track("New Flow Created", { template: `${example.name} Template` });
   };
 
@@ -82,12 +116,13 @@ export default function TemplateContentComponent({
         />
         <Input
           type="search"
-          placeholder="Search..."
+          placeholder={t("templatesModal.search")}
+          icon={"SearchIcon"}
           data-testid="search-input-template"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           ref={searchInputRef}
-          className="w-3/4 rounded-lg bg-background pl-8 lg:w-2/3"
+          className="w-3/4 rounded-lg bg-background lg:w-2/3"
         />
       </div>
       <div
@@ -98,18 +133,19 @@ export default function TemplateContentComponent({
           <TemplateCategoryComponent
             examples={filteredExamples}
             onCardClick={handleCardClick}
+            loading={loading}
           />
         ) : (
           <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
             <p className="text-sm text-secondary-foreground">
-              No templates found.{" "}
+              {t("templatesModal.noTemplatesFound")}{" "}
               <a
                 className="cursor-pointer underline underline-offset-4"
                 onClick={handleClearSearch}
               >
-                Clear your search
+                {t("templatesModal.clearSearch")}
               </a>{" "}
-              and try a different query.
+              {t("templatesModal.tryDifferentQuery")}
             </p>
           </div>
         )}

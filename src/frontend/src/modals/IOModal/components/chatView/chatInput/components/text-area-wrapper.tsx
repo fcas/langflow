@@ -1,30 +1,31 @@
-import { useUtilityStore } from "@/stores/utilityStore";
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { useUtilityStore } from "@/stores/utilityStore";
 import { Textarea } from "../../../../../../components/ui/textarea";
 import { classNames } from "../../../../../../utils/utils";
 
 const TextAreaWrapper = ({
   checkSendingOk,
   send,
-  lockChat,
+  isBuilding,
   noInput,
   chatValue,
   CHAT_INPUT_PLACEHOLDER,
-  CHAT_INPUT_PLACEHOLDER_SEND,
   inputRef,
   files,
   isDragging,
 }) => {
+  const { t } = useTranslation();
   const getPlaceholderText = (
     isDragging: boolean,
     noInput: boolean,
   ): string => {
     if (isDragging) {
-      return "Drop here";
+      return t("ioModal.dropHere");
     } else if (noInput) {
       return CHAT_INPUT_PLACEHOLDER;
     } else {
-      return "Send a message...";
+      return t("chat.inputPlaceholderSend");
     }
   };
 
@@ -36,22 +37,23 @@ const TextAreaWrapper = ({
     "form-input block w-full border-0 custom-scroll focus:border-ring rounded-none shadow-none focus:ring-0 p-0 sm:text-sm !bg-transparent";
 
   useEffect(() => {
-    if (!lockChat && !noInput) {
+    if (!isBuilding && !noInput) {
       inputRef.current?.focus();
     }
-  }, [lockChat, noInput]);
+  }, [isBuilding, noInput]);
 
   return (
     <Textarea
       data-testid="input-chat-playground"
       onKeyDown={(event) => {
         if (checkSendingOk(event)) {
+          event.preventDefault();
           send();
         }
       }}
       rows={1}
       ref={inputRef}
-      disabled={lockChat || noInput}
+      disabled={isBuilding || noInput}
       style={{
         resize: "none",
         bottom: `${inputRef?.current?.scrollHeight}px`,

@@ -1,69 +1,53 @@
-import { expect, test } from "@playwright/test";
-import * as dotenv from "dotenv";
-import path from "path";
-import { addNewApiKeys } from "../../utils/add-new-api-keys";
-import { adjustScreenView } from "../../utils/adjust-screen-view";
+import { expect, test } from "../../fixtures";
 import { awaitBootstrapTest } from "../../utils/await-bootstrap-test";
+import { TEXTS } from "../../utils/constants/texts";
+import { loadDotenvIfLocal } from "../../utils/env/load-dotenv";
 import { getAllResponseMessage } from "../../utils/get-all-response-message";
-import { initialGPTsetup } from "../../utils/initialGPTsetup";
-import { removeOldApiKeys } from "../../utils/remove-old-api-keys";
-import { selectGptModel } from "../../utils/select-gpt-model";
-import { updateOldComponents } from "../../utils/update-old-components";
-import { waitForOpenModalWithChatInput } from "../../utils/wait-for-open-modal";
+import { selectAnthropicModel } from "../../utils/select-anthropic-model";
+import { withEventDeliveryModes } from "../../utils/withEventDeliveryModes";
 
-test(
+withEventDeliveryModes(
   "Custom Component Generator",
-  { tag: ["@release", "@starter-project"] },
+  { tag: ["@release", "@starter-projects"] },
   async ({ page }) => {
     test.skip(
       !process?.env?.ANTHROPIC_API_KEY,
-      "OPENAI_API_KEY required to run this test",
+      "ANTHROPIC_API_KEY required to run this test",
     );
-
-    if (!process.env.CI) {
-      dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-    }
-
+    loadDotenvIfLocal(__dirname);
     await page.goto("/");
 
     await awaitBootstrapTest(page);
 
     await page.getByTestId("side_nav_options_all-templates").click();
     await page.getByTestId("template-custom-component-generator").click();
-
-    await page.waitForSelector('[data-testid="fit_view"]', {
+    await page.waitForSelector('[data-testid="canvas_controls_dropdown"]', {
       timeout: 100000,
     });
 
-    await initialGPTsetup(page);
+    await selectAnthropicModel(page);
 
-    const apiKeyInput = page.getByTestId(
-      "popover-anchor-input-anthropic_api_key",
-    );
-    const isApiKeyInputVisible = await apiKeyInput.isVisible();
+    await page.getByTestId("playground-btn-flow-io").click();
 
-    if (isApiKeyInputVisible) {
-      await apiKeyInput.fill(process.env.ANTHROPIC_API_KEY ?? "");
-    }
-
-    await page.getByTestId("button_run_chat output").click();
-    await page.waitForSelector("text=built successfully", { timeout: 30000 });
-
-    await page.getByText("built successfully").last().click({
-      timeout: 15000,
-    });
-
-    await page.getByText("Playground", { exact: true }).last().click();
     await page
-      .getByText("No input message provided.", { exact: true })
+      .getByTestId("input-chat-playground")
       .last()
-      .isVisible();
+      .fill(
+        "Create a custom component that can generate a random number between 1 and 100 and is called Langflow Random Number",
+      );
 
-    await waitForOpenModalWithChatInput(page);
+    await page.getByTestId("button-send").last().click();
+
+    await page.waitForTimeout(1000);
+
+    const stopButton = page.getByRole("button", { name: TEXTS.stop });
+    await stopButton.waitFor({ state: "hidden", timeout: 30000 * 3 });
 
     const textContents = await getAllResponseMessage(page);
     expect(textContents.length).toBeGreaterThan(100);
-    expect(await page.getByTestId("chat-code-tab").isVisible()).toBe(true);
-    expect(textContents).toContain("langflow");
+    expect(await page.getByTestId("chat-code-tab").last().isVisible()).toBe(
+      true,
+    );
+    expect(textContents.toLowerCase()).toContain("langflow");
   },
 );

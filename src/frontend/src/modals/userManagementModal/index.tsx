@@ -1,16 +1,18 @@
 import * as Form from "@radix-ui/react-form";
 import { Eye, EyeOff } from "lucide-react";
 import { useContext, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import IconComponent from "@/components/common/genericIconComponent";
+import ShadTooltip from "@/components/common/shadTooltipComponent";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
 import { CONTROL_NEW_USER } from "../../constants/constants";
 import { AuthContext } from "../../contexts/authContext";
-import {
+import type {
+  inputHandlerEventType,
   UserInputType,
   UserManagementType,
-  inputHandlerEventType,
 } from "../../types/components";
-import { nodeIconsLucide } from "../../utils/styleUtils";
 import BaseModal from "../baseModal";
 
 export default function UserManagementModal({
@@ -25,7 +27,7 @@ export default function UserManagementModal({
   onConfirm,
   asChild,
 }: UserManagementType) {
-  const Icon: any = nodeIconsLucide[icon];
+  const { t } = useTranslation();
   const [pwdVisible, setPwdVisible] = useState(false);
   const [confirmPwdVisible, setConfirmPwdVisible] = useState(false);
   const [open, setOpen] = useState(false);
@@ -52,9 +54,11 @@ export default function UserManagementModal({
         setIsActive(data.is_active);
         setIsSuperUser(data.is_superuser);
 
-        handleInput({ target: { name: "username", value: username } });
-        handleInput({ target: { name: "is_active", value: isActive } });
-        handleInput({ target: { name: "is_superuser", value: isSuperUser } });
+        handleInput({ target: { name: "username", value: data.username } });
+        handleInput({ target: { name: "is_active", value: data.is_active } });
+        handleInput({
+          target: { name: "is_superuser", value: data.is_superuser },
+        });
       }
     }
   }, [open]);
@@ -72,8 +76,8 @@ export default function UserManagementModal({
       <BaseModal.Trigger asChild={asChild}>{children}</BaseModal.Trigger>
       <BaseModal.Header description={titleHeader}>
         <span className="pr-2">{title}</span>
-        <Icon
-          name="icon"
+        <IconComponent
+          name={icon}
           className="h-6 w-6 pl-1 text-foreground"
           aria-hidden="true"
         />
@@ -101,7 +105,7 @@ export default function UserManagementModal({
                 }}
               >
                 <Form.Label className="data-[invalid]:label-invalid">
-                  Username{" "}
+                  {t("admin.usernameLabel")}{" "}
                   <span className="font-medium text-destructive">*</span>
                 </Form.Label>
               </div>
@@ -114,11 +118,11 @@ export default function UserManagementModal({
                   value={username}
                   className="primary-input"
                   required
-                  placeholder="Username"
+                  placeholder={t("admin.usernamePlaceholder")}
                 />
               </Form.Control>
               <Form.Message match="valueMissing" className="field-invalid">
-                Please enter your username
+                {t("admin.usernameRequired")}
               </Form.Message>
             </Form.Field>
 
@@ -136,7 +140,7 @@ export default function UserManagementModal({
                     }}
                   >
                     <Form.Label className="data-[invalid]:label-invalid flex">
-                      Password{" "}
+                      {t("admin.passwordLabel")}{" "}
                       <span className="ml-1 mr-1 font-medium text-destructive">
                         *
                       </span>
@@ -170,12 +174,12 @@ export default function UserManagementModal({
                   </Form.Control>
 
                   <Form.Message className="field-invalid" match="valueMissing">
-                    Please enter a password
+                    {t("admin.passwordRequired")}
                   </Form.Message>
 
                   {password != confirmPassword && (
                     <Form.Message className="field-invalid">
-                      Passwords do not match
+                      {t("admin.passwordsDoNotMatch")}
                     </Form.Message>
                   )}
                 </Form.Field>
@@ -194,7 +198,7 @@ export default function UserManagementModal({
                     }}
                   >
                     <Form.Label className="data-[invalid]:label-invalid flex">
-                      Confirm password{" "}
+                      {t("admin.confirmPasswordLabel")}{" "}
                       <span className="ml-1 mr-1 font-medium text-destructive">
                         *
                       </span>
@@ -230,7 +234,7 @@ export default function UserManagementModal({
                     />
                   </Form.Control>
                   <Form.Message className="field-invalid" match="valueMissing">
-                    Please confirm your password
+                    {t("admin.confirmPasswordRequired")}
                   </Form.Message>
                 </Form.Field>
               </div>
@@ -239,27 +243,41 @@ export default function UserManagementModal({
               <Form.Field name="is_active">
                 <div>
                   <Form.Label className="data-[invalid]:label-invalid mr-3">
-                    Active
+                    {t("admin.columnActive")}
                   </Form.Label>
-                  <Form.Control asChild>
-                    <Checkbox
-                      value={isActive}
-                      checked={isActive}
-                      id="is_active"
-                      className="relative top-0.5"
-                      onCheckedChange={(value) => {
-                        handleInput({ target: { name: "is_active", value } });
-                        setIsActive(value);
-                      }}
-                    />
-                  </Form.Control>
+                  {data?.id === userData?.id ? (
+                    <ShadTooltip content={t("admin.cannotDeactivateSelf")}>
+                      <span className="inline-block cursor-not-allowed">
+                        <Checkbox
+                          value={isActive}
+                          checked={isActive}
+                          id="is_active"
+                          className="relative top-0.5 pointer-events-none opacity-50"
+                          disabled
+                        />
+                      </span>
+                    </ShadTooltip>
+                  ) : (
+                    <Form.Control asChild>
+                      <Checkbox
+                        value={isActive}
+                        checked={isActive}
+                        id="is_active"
+                        className="relative top-0.5"
+                        onCheckedChange={(value) => {
+                          handleInput({ target: { name: "is_active", value } });
+                          setIsActive(value);
+                        }}
+                      />
+                    </Form.Control>
+                  )}
                 </div>
               </Form.Field>
               {userData?.is_superuser && (
                 <Form.Field name="is_superuser">
                   <div>
                     <Form.Label className="data-[invalid]:label-invalid mr-3">
-                      Superuser
+                      {t("admin.columnSuperuser")}
                     </Form.Label>
                     <Form.Control asChild>
                       <Checkbox

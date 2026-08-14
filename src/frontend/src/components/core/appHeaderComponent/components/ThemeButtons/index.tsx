@@ -1,7 +1,7 @@
+import { useEffect, useState } from "react";
 import ForwardedIconComponent from "@/components/common/genericIconComponent";
 import { Button } from "@/components/ui/button";
 import useTheme from "@/customization/hooks/use-custom-theme";
-import { useEffect, useState } from "react";
 
 export const ThemeButtons = () => {
   const { systemTheme, dark, setThemePreference } = useTheme();
@@ -30,12 +30,12 @@ export const ThemeButtons = () => {
   };
 
   return (
-    <div className="relative ml-auto inline-flex rounded-full border border-border p-0.5">
+    <div className="relative ml-auto inline-flex rounded-full border border-border">
       {/* Sliding Indicator - Behind the Buttons */}
       <div
-        className={`absolute bottom-0.5 left-[1px] top-0.5 w-[30%] rounded-full bg-amber-400 ${
+        className={`absolute bottom-0.5 left-[1px] top-0.5 w-[30%] rounded-full bg-accent-amber-foreground ${
           hasInteracted ? "transition-all duration-300" : ""
-        } dark:bg-purple-400`}
+        } dark:bg-accent-purple-foreground`}
         style={{
           transform: `translateX(${
             selectedTheme === "light"
@@ -53,12 +53,14 @@ export const ThemeButtons = () => {
         unstyled
         className={`relative z-10 inline-flex items-center rounded-full px-1 ${
           selectedTheme === "light"
-            ? "text-foreground"
-            : "text-foreground hover:bg-amber-400 hover:text-background"
+            ? "text-background"
+            : "text-foreground hover:bg-accent-amber-foreground hover:text-background"
         }`}
         onClick={() => handleThemeChange("light")}
+        data-testid="menu_light_button"
+        id="menu_light_button"
       >
-        <ForwardedIconComponent name="Sun" className="w-4" />
+        <ForwardedIconComponent strokeWidth={2} name="Sun" className="w-4" />
       </Button>
 
       {/* Dark Theme Button */}
@@ -66,12 +68,14 @@ export const ThemeButtons = () => {
         unstyled
         className={`relative z-10 mx-1 inline-flex items-center rounded-full px-1 ${
           selectedTheme === "dark"
-            ? "text-background dark:hover:bg-purple-400"
-            : "text-foreground hover:bg-purple-400 hover:text-background"
+            ? "bg-indigo-foreground text-primary hover:bg-indigo-foreground"
+            : "text-foreground hover:bg-indigo-foreground hover:text-background"
         }`}
         onClick={() => handleThemeChange("dark")}
+        data-testid="menu_dark_button"
+        id="menu_dark_button"
       >
-        <ForwardedIconComponent name="Moon" className="w-4" />
+        <ForwardedIconComponent strokeWidth={2} name="Moon" className="w-4" />
       </Button>
 
       {/* System Theme Button */}
@@ -83,8 +87,14 @@ export const ThemeButtons = () => {
             : "hover:bg-foreground hover:text-background"
         }`}
         onClick={() => handleThemeChange("system")}
+        data-testid="menu_system_button"
+        id="menu_system_button"
       >
-        <ForwardedIconComponent name="Monitor" className="w-4" />
+        <ForwardedIconComponent
+          name="Monitor"
+          className="w-4"
+          strokeWidth={2}
+        />
       </Button>
     </div>
   );
